@@ -47,11 +47,25 @@ python3 launch.py # Prints a list of available models
 python3 launch.py llama3_2_3b_instruct_q40 # Downloads the model to the root device
 ```
 
-5. Start workers on all **🔹 WORKER** devices:
+5. Start workers on all **🔹 WORKER** devices.
+
+**Option A — Static mode** (root lists all worker IPs explicitly):
 
 ```sh
 ./dllama worker --port 9999 --nthreads 4
 ```
+
+**Option B — Discovery mode** (worker connects to root automatically):
+
+```sh
+./dllama worker \
+  --port 9999 \
+  --nthreads 4 \
+  --server 10.0.0.1:9990 \
+  --cache-dir /tmp/dllama_cache
+```
+
+With `--server`, the worker self-registers with the root node. `--cache-dir` saves the received model weights locally so the next reconnect skips the full weight transfer.
 
 6. Run the inference to test if everything works fine on the **🔸 ROOT** device:
 
@@ -67,11 +81,13 @@ python3 launch.py llama3_2_3b_instruct_q40 # Downloads the model to the root dev
   --workers 10.0.0.2:9999 10.0.0.3:9999 10.0.0.4:9999
 ```
 
-7. To run the API server, start it on the **🔸 ROOT** device:
+7. To run the API server, start it on the **🔸 ROOT** device.
+
+**Option A — Static workers** (explicit IP list):
 
 ```sh
 ./dllama-api \
-  --port 9999 \
+  --port 9990 \
   --model models/llama3_2_3b_instruct_q40/dllama_model_llama3_2_3b_instruct_q40.m \
   --tokenizer models/llama3_2_3b_instruct_q40/dllama_tokenizer_llama3_2_3b_instruct_q40.t \
   --buffer-float-type q80 \
@@ -80,10 +96,26 @@ python3 launch.py llama3_2_3b_instruct_q40 # Downloads the model to the root dev
   --workers 10.0.0.2:9999 10.0.0.3:9999 10.0.0.4:9999
 ```
 
+**Option B — Dynamic discovery** (workers self-register, no IPs needed):
+
+```sh
+./dllama-api \
+  --port 9990 \
+  --model models/llama3_2_3b_instruct_q40/dllama_model_llama3_2_3b_instruct_q40.m \
+  --tokenizer models/llama3_2_3b_instruct_q40/dllama_tokenizer_llama3_2_3b_instruct_q40.t \
+  --buffer-float-type q80 \
+  --nthreads 4 \
+  --max-seq-len 4096 \
+  --min-workers 3 \
+  --points-file /tmp/dllama_points.json
+```
+
+The server waits until the specified number of workers connect, then starts inference. If a worker disconnects it automatically waits for reconnection and reshards.
+
 Now you can connect to the API server:
 
 ```
-http://10.0.0.1:9999/v1/models
+http://10.0.0.1:9990/v1/models
 ```
 
-8. When the API server is running, you can open the web chat in your browser, open [llama-ui.js.org](https://llama-ui.js.org/), go to the settings and set the base URL to: `http://10.0.0.1:9999`. Press the "save" button and start chatting!
+8. When the API server is running, you can open the web chat in your browser, open [llama-ui.js.org](https://llama-ui.js.org/), go to the settings and set the base URL to: `http://10.0.0.1:9990`. Press the "save" button and start chatting!
