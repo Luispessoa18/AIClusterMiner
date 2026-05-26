@@ -1,3 +1,4 @@
+#include <string>
 #include "nn-quants.hpp"
 #include <cassert>
 #include <cstring>

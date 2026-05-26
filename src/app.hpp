@@ -4,8 +4,20 @@
 #include <chrono>
 #include "nn/nn-core.hpp"
 #include "nn/nn-cpu.hpp"
+#include "nn/nn-network.hpp"
+#include "nn/nn-worker-cache.hpp"
 #include "tokenizer.hpp"
 #include "llm.hpp"
+
+struct WorkerRuntimeInfo {
+    char hostname[256];
+    NnUint cpuCores;
+    NnUint cpuMhz;
+    NnUint totalMemoryMb;
+    NnUint nodeIndex;
+    uint64_t points;
+    uint64_t tokensGenerated;
+};
 
 class AppCliArgs {
 public:
@@ -35,9 +47,16 @@ public:
     int gpuSegmentFrom;
     int gpuSegmentTo;
 
-    // binding
+    // binding / discovery
     const char *host;
     NnUint port;
+    NnUint minWorkers;   // server: wait for this many workers via discovery (enables dynamic mode)
+    char *pointsFile;    // server: JSON file to persist per-node points (nullptr = disable)
+
+    // worker mode
+    char *serverHost;    // worker: server's discovery host (triggers discovery registration)
+    NnUint serverPort;   // worker: server's discovery port
+    char *cacheDir;      // worker: directory to cache model weights between sessions
 
     static AppCliArgs parse(int argc, char **argv, bool hasMode);
     ~AppCliArgs();
@@ -89,6 +108,9 @@ typedef struct {
     Sampler *sampler;
     NnNetwork *network;
     NnExecutor *executor;
+    WorkerRuntimeInfo *workers;  // [0] = root, [1..n] = registered workers
+    NnUint nWorkerInfos;
+    const char *pointsFile;
 } AppInferenceContext;
 
 void runInferenceApp(AppCliArgs *args, void (*handler)(AppInferenceContext *context));

@@ -1,3 +1,4 @@
+#include <string>
 #include "nn/nn-core.hpp"
 #include "nn/nn-config-builder.hpp"
 #include "nn/nn-cpu.hpp"

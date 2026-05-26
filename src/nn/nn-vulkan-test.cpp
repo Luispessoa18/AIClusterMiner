@@ -1,3 +1,4 @@
+#include <string>
 #include <cstdio>
 #include <cmath>
 #include "nn-config-builder.hpp"

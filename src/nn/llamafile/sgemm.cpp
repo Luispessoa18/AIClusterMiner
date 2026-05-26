@@ -1,3 +1,4 @@
+#include <string>
 // Copyright 2024 Mozilla Foundation
 //
 // Permission is hereby granted, free of charge, to any person obtaining

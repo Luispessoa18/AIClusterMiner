@@ -1,16 +1,26 @@
+#include <string>
+#include <thread>
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h> // For inet_addr and other functions
 #include <windows.h>  // For SSIZE_T
 typedef SSIZE_T ssize_t;
+#elif defined(__APPLE__)
+#include <sys/socket.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <netdb.h>
+#include <sys/sysctl.h>
 #else
 #include <sys/socket.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <netdb.h>  // for getaddrinfo
+#include <netdb.h>
 #endif
 #include "nn-network.hpp"
+#include "nn-worker-cache.hpp"
 #include <cassert>
 #include <cstring>
 #include <stdexcept>
@@ -256,6 +266,211 @@ void cleanupSockets() {
 #ifdef _WIN32
     WSACleanup();
 #endif
+}
+
+NnUint getSysCpuCores() {
+    return (NnUint)std::thread::hardware_concurrency();
+}
+
+NnUint getSysCpuMhz() {
+#if defined(__APPLE__)
+    uint64_t freq = 0;
+    size_t size = sizeof(freq);
+    if (sysctlbyname("hw.cpufrequency_max", &freq, &size, nullptr, 0) == 0)
+        return (NnUint)(freq / 1000000ULL);
+    return 0;
+#elif defined(__linux__)
+    FILE *f = fopen("/proc/cpuinfo", "r");
+    if (!f) return 0;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        float mhz = 0;
+        if (sscanf(line, "cpu MHz : %f", &mhz) == 1) {
+            fclose(f);
+            return (NnUint)mhz;
+        }
+    }
+    fclose(f);
+    return 0;
+#elif defined(_WIN32)
+    HKEY key;
+    if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, TEXT("HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"), 0, KEY_READ, &key) != ERROR_SUCCESS)
+        return 0;
+    DWORD mhz = 0, sz = sizeof(mhz);
+    RegQueryValueEx(key, TEXT("~MHz"), nullptr, nullptr, (LPBYTE)&mhz, &sz);
+    RegCloseKey(key);
+    return (NnUint)mhz;
+#else
+    return 0;
+#endif
+}
+
+NnUint getSysTotalMemoryMb() {
+#if defined(__APPLE__)
+    uint64_t mem = 0;
+    size_t size = sizeof(mem);
+    if (sysctlbyname("hw.memsize", &mem, &size, nullptr, 0) == 0)
+        return (NnUint)(mem / (1024ULL * 1024ULL));
+    return 0;
+#elif defined(__linux__)
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (!f) return 0;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        unsigned long kb = 0;
+        if (sscanf(line, "MemTotal: %lu kB", &kb) == 1) {
+            fclose(f);
+            return (NnUint)(kb / 1024UL);
+        }
+    }
+    fclose(f);
+    return 0;
+#elif defined(_WIN32)
+    MEMORYSTATUSEX status;
+    status.dwLength = sizeof(status);
+    GlobalMemoryStatusEx(&status);
+    return (NnUint)(status.ullTotalPhys / (1024ULL * 1024ULL));
+#else
+    return 0;
+#endif
+}
+
+void getSysHostname(char *buf, NnUint size) {
+    if (gethostname(buf, size) != 0)
+        std::strncpy(buf, "unknown", size);
+    buf[size - 1] = '\0';
+}
+
+void acceptWorkerRegistrations(const char *host, NnUint port, NnUint nWorkers,
+    uint64_t modelHash, char **outHosts, NnUint *outPorts, bool *outCacheValid,
+    WorkerSysInfo *outSysInfo) {
+    printf("🔍 Waiting for %u worker(s) to register on %s:%u...\n", nWorkers, host, port);
+
+    NnSocket serverSocket(createServerSocket(host, port));
+
+    // Phase 1: collect HELLO from all workers, keep sockets open
+    std::vector<int> clientFds(nWorkers);
+    for (NnUint i = 0; i < nWorkers; i++) {
+        clientFds[i] = acceptSocket(serverSocket.fd);
+
+        NnUint magic;
+        readSocket(clientFds[i], &magic, sizeof(magic));
+        if (magic != WORKER_HELLO_MAGIC) {
+            destroySocket(clientFds[i]);
+            throw std::runtime_error("Worker registration: invalid hello magic");
+        }
+
+        NnUint listenPort;
+        readSocket(clientFds[i], &listenPort, sizeof(listenPort));
+        outPorts[i] = listenPort;
+
+        // Read display hostname sent by worker
+        NnUint hostnameLen;
+        readSocket(clientFds[i], &hostnameLen, sizeof(hostnameLen));
+        std::vector<char> hostnameBuf(hostnameLen);
+        readSocket(clientFds[i], hostnameBuf.data(), hostnameLen);
+        std::strncpy(outSysInfo[i].displayHostname, hostnameBuf.data(), sizeof(outSysInfo[i].displayHostname) - 1);
+        outSysInfo[i].displayHostname[sizeof(outSysInfo[i].displayHostname) - 1] = '\0';
+
+        readSocket(clientFds[i], &outSysInfo[i].cpuCores, sizeof(outSysInfo[i].cpuCores));
+        readSocket(clientFds[i], &outSysInfo[i].cpuMhz, sizeof(outSysInfo[i].cpuMhz));
+        readSocket(clientFds[i], &outSysInfo[i].totalMemoryMb, sizeof(outSysInfo[i].totalMemoryMb));
+        outSysInfo[i].listenPort = listenPort;
+
+        // Get worker IP from the accepted connection
+        struct sockaddr_in clientAddr;
+        socklen_t addrLen = sizeof(clientAddr);
+        getpeername(clientFds[i], (struct sockaddr *)&clientAddr, &addrLen);
+        const char *workerIp = inet_ntoa(clientAddr.sin_addr);
+        std::strncpy(outSysInfo[i].connectHost, workerIp, sizeof(outSysInfo[i].connectHost) - 1);
+        outSysInfo[i].connectHost[sizeof(outSysInfo[i].connectHost) - 1] = '\0';
+        outHosts[i] = new char[strlen(workerIp) + 1];
+        strcpy(outHosts[i], workerIp);
+
+        printf("🔍 Worker %u registered: %s:%u (%s, %u cores, %u MHz, %u MB RAM)\n",
+               i + 1, outHosts[i], outPorts[i],
+               outSysInfo[i].displayHostname, outSysInfo[i].cpuCores,
+               outSysInfo[i].cpuMhz, outSysInfo[i].totalMemoryMb);
+    }
+
+    // Phase 2: send assignments (nodeIndex, nNodes, modelHash) to all workers
+    NnUint totalNodes = nWorkers + 1;
+    for (NnUint i = 0; i < nWorkers; i++) {
+        NnUint assignMagic = WORKER_ASSIGN_MAGIC;
+        NnUint nodeIndex = i + 1;
+        writeSocket(clientFds[i], &assignMagic, sizeof(assignMagic));
+        writeSocket(clientFds[i], &nodeIndex, sizeof(nodeIndex));
+        writeSocket(clientFds[i], &totalNodes, sizeof(totalNodes));
+        writeSocket(clientFds[i], &modelHash, sizeof(modelHash));
+    }
+
+    // Phase 3: read cache status from each worker
+    for (NnUint i = 0; i < nWorkers; i++) {
+        NnUint cacheFlag;
+        readSocket(clientFds[i], &cacheFlag, sizeof(cacheFlag));
+        outCacheValid[i] = (cacheFlag == 1);
+        if (outCacheValid[i])
+            printf("🔍 Worker %u has valid weight cache\n", i + 1);
+        destroySocket(clientFds[i]);
+    }
+
+    printf("🔍 All %u worker(s) registered\n", nWorkers);
+}
+
+WorkerRegistrationResult registerWithServer(const char *serverHost, NnUint serverPort,
+    NnUint myListenPort, const char *cacheDir) {
+    printf("🔍 Registering with server %s:%u (listen port: %u)...\n", serverHost, serverPort, myListenPort);
+
+    int sock = connectSocket((char *)serverHost, (int)serverPort);
+    setNoDelay(sock);
+
+    // Send HELLO with sysinfo
+    NnUint magic = WORKER_HELLO_MAGIC;
+    writeSocket(sock, &magic, sizeof(magic));
+    writeSocket(sock, &myListenPort, sizeof(myListenPort));
+
+    char myHostname[256];
+    getSysHostname(myHostname, sizeof(myHostname));
+    NnUint hostnameLen = (NnUint)std::strlen(myHostname) + 1;
+    writeSocket(sock, &hostnameLen, sizeof(hostnameLen));
+    writeSocket(sock, myHostname, hostnameLen);
+
+    NnUint cpuCores = getSysCpuCores();
+    NnUint cpuMhz = getSysCpuMhz();
+    NnUint totalMemoryMb = getSysTotalMemoryMb();
+    writeSocket(sock, &cpuCores, sizeof(cpuCores));
+    writeSocket(sock, &cpuMhz, sizeof(cpuMhz));
+    writeSocket(sock, &totalMemoryMb, sizeof(totalMemoryMb));
+
+    // Receive assignment
+    NnUint assignMagic;
+    readSocket(sock, &assignMagic, sizeof(assignMagic));
+    if (assignMagic != WORKER_ASSIGN_MAGIC) {
+        destroySocket(sock);
+        throw std::runtime_error("Worker registration: invalid assign magic from server");
+    }
+
+    WorkerRegistrationResult result;
+    readSocket(sock, &result.nodeIndex, sizeof(result.nodeIndex));
+    readSocket(sock, &result.nNodes, sizeof(result.nNodes));
+    readSocket(sock, &result.modelHash, sizeof(result.modelHash));
+
+    // Check local weight cache
+    result.usedCache = false;
+    NnUint cacheFlag = 0;
+    if (cacheDir != nullptr) {
+        NnWorkerWeightCache cache(cacheDir, result.modelHash, result.nNodes, result.nodeIndex);
+        if (cache.isValid()) {
+            cacheFlag = 1;
+            result.usedCache = true;
+        }
+    }
+    writeSocket(sock, &cacheFlag, sizeof(cacheFlag));
+
+    destroySocket(sock);
+    printf("🔍 Registered as worker %u of %u (cache: %s)\n",
+           result.nodeIndex, result.nNodes, result.usedCache ? "hit" : "miss");
+    return result;
 }
 
 NnConnectionSocketException::NnConnectionSocketException(const std::string message)
@@ -799,17 +1014,31 @@ NnRootWeightLoader::NnRootWeightLoader(NnExecutor *executor, NnNetwork *network,
     this->network = network;
     this->nNodes = nNodes;
     this->tempSize = 0;
+    this->workerCacheValid = new bool[nNodes > 1 ? nNodes - 1 : 1]();
 }
 
 NnRootWeightLoader::~NnRootWeightLoader() {
     if (tempSize > 0)
         delete[] temp;
+    delete[] workerCacheValid;
+}
+
+void NnRootWeightLoader::setWorkerCacheValid(NnUint nodeIndex, bool valid) {
+    assert(nodeIndex >= 1 && nodeIndex < nNodes);
+    workerCacheValid[nodeIndex - 1] = valid;
+    if (valid)
+        printf("⚡ Skipping weight transfer to worker %u (cache hit)\n", nodeIndex);
 }
 
 void NnRootWeightLoader::finish() {
     NnUint zeroSize = 0;
+    NnUint cacheSkip = WEIGHT_CACHE_SKIP;
     for (NnUint socketIndex = 0; socketIndex < nNodes - 1; socketIndex++) {
-        network->write(socketIndex, &zeroSize, sizeof(zeroSize));
+        if (workerCacheValid[socketIndex]) {
+            network->write(socketIndex, &cacheSkip, sizeof(cacheSkip));
+        } else {
+            network->write(socketIndex, &zeroSize, sizeof(zeroSize));
+        }
         network->readAck(socketIndex);
     }
     if (tempSize > 0) {
@@ -828,6 +1057,7 @@ void NnRootWeightLoader::allocate(NnSize size) {
 }
 
 void NnRootWeightLoader::writeWeight(NnUint nodeIndex, const char *opName, NnUint opIndex, NnSize offset, NnSize nBytes, NnByte *weight) {
+    if (workerCacheValid[nodeIndex - 1]) return; // worker has cached weights, skip transfer
     NnUint nameSize = std::strlen(opName) + 1;
     NnUint socketIndex = nodeIndex - 1;
     network->write(socketIndex, &nameSize, sizeof(nameSize));
@@ -891,6 +1121,16 @@ NnWorkerWeightReader::NnWorkerWeightReader(NnExecutor *executor, NnNetwork *netw
     this->executor = executor;
     this->network = network;
     this->tempSize = 0;
+    this->cache = nullptr;
+    this->useCache = false;
+}
+
+NnWorkerWeightReader::NnWorkerWeightReader(NnExecutor *executor, NnNetwork *network, NnWorkerWeightCache *cache, bool useCache) {
+    this->executor = executor;
+    this->network = network;
+    this->tempSize = 0;
+    this->cache = cache;
+    this->useCache = useCache;
 }
 
 NnWorkerWeightReader::~NnWorkerWeightReader() {
@@ -909,19 +1149,47 @@ void NnWorkerWeightReader::allocate(NnUint size) {
 
 void NnWorkerWeightReader::read() {
     NnUint nameSize;
+
+    // Read the first nameSize to detect cache-skip or normal weights
+    network->read(ROOT_SOCKET_INDEX, &nameSize, sizeof(nameSize));
+
+    if (nameSize == WEIGHT_CACHE_SKIP) {
+        // Server says: you have valid cache, load from disk
+        network->writeAck(ROOT_SOCKET_INDEX);
+        if (cache != nullptr) {
+            cache->loadFromDisk(executor);
+        } else {
+            throw std::runtime_error("Server sent cache-skip signal but no cache directory configured");
+        }
+        return;
+    }
+
+    // Normal weight transfer path; optionally save to cache file
+    FILE *cacheFile = nullptr;
+    if (cache != nullptr && !useCache) {
+        cacheFile = cache->openForWriting();
+    }
+
     NnUint opIndex;
     NnSize offset;
     NnSize nBytes;
+
     while (true) {
-        network->read(0, &nameSize, sizeof(nameSize));
         if (nameSize == 0) {
             network->writeAck(ROOT_SOCKET_INDEX);
+            if (cacheFile != nullptr) {
+                NnWorkerWeightCache::writeTerminator(cacheFile);
+                fclose(cacheFile);
+                cacheFile = nullptr;
+                printf("💾 Weights saved to cache\n");
+            }
             if (tempSize > 0) {
-                delete temp;
+                delete[] temp;
                 tempSize = 0;
             }
             break;
         }
+
         std::unique_ptr<char[]> opNamePtr(new char[nameSize]);
         char *opName = opNamePtr.get();
         network->read(ROOT_SOCKET_INDEX, opName, nameSize);
@@ -929,9 +1197,14 @@ void NnWorkerWeightReader::read() {
         network->read(ROOT_SOCKET_INDEX, &offset, sizeof(offset));
         network->read(ROOT_SOCKET_INDEX, &nBytes, sizeof(nBytes));
         allocate(nBytes);
-        network->read(0, temp, nBytes);
+        network->read(ROOT_SOCKET_INDEX, temp, nBytes);
         executor->loadWeight(opName, opIndex, offset, nBytes, temp);
         printf("💿 Loaded %22s %3d, %12zu kB\n", opName, opIndex, nBytes / 1024);
+
+        if (cacheFile != nullptr)
+            NnWorkerWeightCache::writeEntry(cacheFile, opName, opIndex, offset, nBytes, temp);
+
+        network->read(ROOT_SOCKET_INDEX, &nameSize, sizeof(nameSize));
     }
     printf("💿 Weights loaded\n");
 }

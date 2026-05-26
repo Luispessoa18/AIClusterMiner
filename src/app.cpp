@@ -1,7 +1,9 @@
+#include <string>
 #include "app.hpp"
 #include <cassert>
 #include <cstring>
 #include <stdexcept>
+#include <vector>
 #if defined(DLLAMA_VULKAN)
     #include "nn/nn-vulkan.hpp"
 #endif
@@ -37,6 +39,11 @@ AppCliArgs AppCliArgs::parse(int argc, char* *argv, bool requireMode) {
     args.workerPorts = nullptr;
     args.host = "0.0.0.0";
     args.port = 9990;
+    args.minWorkers = 0;
+    args.pointsFile = nullptr;
+    args.serverHost = nullptr;
+    args.serverPort = 9990;
+    args.cacheDir = nullptr;
     args.temperature = 0.8f;
     args.topp = 0.9f;
     args.steps = 0;
@@ -96,6 +103,21 @@ AppCliArgs AppCliArgs::parse(int argc, char* *argv, bool requireMode) {
             }
 
             i += count - 1;
+        } else if (std::strcmp(name, "--min-workers") == 0) {
+            args.minWorkers = std::atoi(value);
+        } else if (std::strcmp(name, "--points-file") == 0) {
+            args.pointsFile = value;
+        } else if (std::strcmp(name, "--server") == 0) {
+            char *sep = std::strstr(value, ":");
+            if (sep == nullptr)
+                throw std::runtime_error("--server format: host:port");
+            int hostLen = sep - value;
+            args.serverHost = new char[hostLen + 1];
+            std::memcpy(args.serverHost, value, hostLen);
+            args.serverHost[hostLen] = '\0';
+            args.serverPort = std::atoi(sep + 1);
+        } else if (std::strcmp(name, "--cache-dir") == 0) {
+            args.cacheDir = value;
         } else if (std::strcmp(name, "--port") == 0) {
             args.port = atoi(value);
         } else if (std::strcmp(name, "--host") == 0) {
@@ -142,6 +164,8 @@ AppCliArgs::~AppCliArgs() {
     }
     if (workerPorts != nullptr)
         delete[] workerPorts;
+    if (serverHost != nullptr)
+        delete[] serverHost;
 }
 
 static std::vector<NnExecutorDevice> resolveDevices(AppCliArgs *args, NnNetConfig *netConfig, NnNodeConfig *nodeConfig, NnNetExecution *netExecution) {
@@ -195,7 +219,7 @@ void RootLlmInference::setToken(NnUint batchIndex, NnUint token) {
 }
 
 void RootLlmInference::forward() {
-    if (network != nullptr) 
+    if (network != nullptr)
         network->writeAll(&controlPacket, sizeof(LlmControlPacket));
     executor->forward();
 }
@@ -230,12 +254,7 @@ bool WorkerLlmInference::tryReadControlPacket() {
 }
 
 void runInferenceApp(AppCliArgs *args, void (*handler)(AppInferenceContext *context)) {
-    NnUint nNodes = args->nWorkers + 1;
-
     LlmHeader header = loadLlmHeader(args->modelPath, args->maxSeqLen, args->syncType);
-    if (nNodes > header.nKvHeads)
-        // TODO: https://github.com/b4rtaz/distributed-llama/issues/70
-        throw std::runtime_error("This version does not support more nodes than the number of KV heads in the model");
     if (header.weightType == F_Q40 && header.syncType != F_Q80)
         throw std::runtime_error("This version supports only Q40 weights with Q80 sync type");
 
@@ -245,67 +264,191 @@ void runInferenceApp(AppCliArgs *args, void (*handler)(AppInferenceContext *cont
 
     Sampler sampler(tokenizer.vocabSize, args->temperature, args->topp, args->seed);
 
-    LlmNet net = buildLlmNet(&header, nNodes, args->nBatches);
-    std::unique_ptr<LlmNet, void(*)(LlmNet *)> netPtr(&net, releaseLlmNet);
+    // Compute model hash once (needed for discovery/cache)
+    bool discoveryMode = (args->minWorkers > 0 && args->nWorkers == 0);
+    uint64_t modelHash = discoveryMode ? computeModelHash(args->modelPath) : 0;
 
-    NnNodeConfig *rootNodeConfig = &net.nodeConfigs[0];
+    bool firstIteration = true;
+    while (true) {
+        // Determine workers for this iteration
+        NnUint effectiveNWorkers;
+        char **effectiveWorkerHosts;
+        NnUint *effectiveWorkerPorts;
+        bool *cacheValidArr = nullptr;
+        WorkerSysInfo *sysInfoArr = nullptr;
+        bool ownedWorkerInfo = false;
 
-    if (args->info) {
-        tokenizer.printHeader();
-        printLlmHeader(&header);
-        printNodeRequiredMemory(&net.netConfig, rootNodeConfig);
-    }
+        if (discoveryMode) {
+            effectiveNWorkers = args->minWorkers;
+            effectiveWorkerHosts = new char*[effectiveNWorkers];
+            effectiveWorkerPorts = new NnUint[effectiveNWorkers];
+            cacheValidArr = new bool[effectiveNWorkers]();
+            sysInfoArr = new WorkerSysInfo[effectiveNWorkers]();
 
-    NnNetExecution execution(args->nThreads, &net.netConfig);
-
-    std::unique_ptr<NnNodeSynchronizer> synchronizer(nullptr);
-    std::unique_ptr<NnNetwork> networkPtr(nullptr);
-    NnNetwork *network = nullptr;
-
-    if (nNodes == 1) {
-        synchronizer.reset(new NnFakeNodeSynchronizer());
-    } else {
-        networkPtr = NnNetwork::connect(args->nWorkers, args->workerHosts, args->workerPorts);
-        network = networkPtr.get();
-        synchronizer.reset(new NnNetworkNodeSynchronizer(network, &execution, &net.netConfig, rootNodeConfig));
-
-        NnRootConfigWriter configWriter(network);
-        configWriter.writeToWorkers(&net.netConfig, net.nodeConfigs);
-    }
-
-    std::vector<NnExecutorDevice> devices = resolveDevices(args, &net.netConfig, rootNodeConfig, &execution);
-    NnExecutor executor(&net.netConfig, rootNodeConfig, &devices, &execution, synchronizer.get(), args->benchmark);
-
-    NnRootWeightLoader weightLoader(&executor, network, nNodes);
-    loadLlmNetWeight(args->modelPath, &net, &weightLoader);
-
-    RootLlmInference inference(&net, &execution, &executor, network);
-
-    if (network != nullptr) {
-        network->resetStats();
-        if (args->netTurbo) {
-            network->setTurbo(true);
-            printf("🚁 Network is in non-blocking mode\n");
+            acceptWorkerRegistrations(args->host, args->port, effectiveNWorkers,
+                modelHash, effectiveWorkerHosts, effectiveWorkerPorts, cacheValidArr, sysInfoArr);
+            ownedWorkerInfo = true;
+        } else {
+            effectiveNWorkers = args->nWorkers;
+            effectiveWorkerHosts = args->workerHosts;
+            effectiveWorkerPorts = args->workerPorts;
         }
+
+        NnUint nNodes = effectiveNWorkers + 1;
+
+        if (nNodes > header.nKvHeads)
+            // TODO: https://github.com/b4rtaz/distributed-llama/issues/70
+            throw std::runtime_error("This version does not support more nodes than the number of KV heads in the model");
+
+        LlmNet net = buildLlmNet(&header, nNodes, args->nBatches);
+        std::unique_ptr<LlmNet, void(*)(LlmNet *)> netPtr(&net, releaseLlmNet);
+
+        NnNodeConfig *rootNodeConfig = &net.nodeConfigs[0];
+
+        if (firstIteration && args->info) {
+            tokenizer.printHeader();
+            printLlmHeader(&header);
+            printNodeRequiredMemory(&net.netConfig, rootNodeConfig);
+        }
+
+        NnNetExecution execution(args->nThreads, &net.netConfig);
+
+        std::unique_ptr<NnNodeSynchronizer> synchronizer(nullptr);
+        std::unique_ptr<NnNetwork> networkPtr(nullptr);
+        NnNetwork *network = nullptr;
+
+        if (nNodes == 1) {
+            synchronizer.reset(new NnFakeNodeSynchronizer());
+        } else {
+            networkPtr = NnNetwork::connect(effectiveNWorkers, effectiveWorkerHosts, effectiveWorkerPorts);
+            network = networkPtr.get();
+            synchronizer.reset(new NnNetworkNodeSynchronizer(network, &execution, &net.netConfig, rootNodeConfig));
+
+            NnRootConfigWriter configWriter(network);
+            configWriter.writeToWorkers(&net.netConfig, net.nodeConfigs);
+        }
+
+        std::vector<NnExecutorDevice> devices = resolveDevices(args, &net.netConfig, rootNodeConfig, &execution);
+        NnExecutor executor(&net.netConfig, rootNodeConfig, &devices, &execution, synchronizer.get(), args->benchmark);
+
+        NnRootWeightLoader weightLoader(&executor, network, nNodes);
+        if (cacheValidArr != nullptr) {
+            for (NnUint i = 0; i < effectiveNWorkers; i++)
+                weightLoader.setWorkerCacheValid(i + 1, cacheValidArr[i]);
+        }
+        loadLlmNetWeight(args->modelPath, &net, &weightLoader);
+
+        RootLlmInference inference(&net, &execution, &executor, network);
+
+        if (network != nullptr) {
+            network->resetStats();
+            if (args->netTurbo) {
+                network->setTurbo(true);
+                printf("🚁 Network is in non-blocking mode\n");
+            }
+        }
+
+        // Build per-node runtime info for the UI/points system
+        NnUint nWorkerInfos = nNodes;
+        WorkerRuntimeInfo *workerInfos = new WorkerRuntimeInfo[nWorkerInfos]();
+
+        // Root node
+        getSysHostname(workerInfos[0].hostname, sizeof(workerInfos[0].hostname));
+        workerInfos[0].cpuCores = getSysCpuCores();
+        workerInfos[0].cpuMhz = getSysCpuMhz();
+        workerInfos[0].totalMemoryMb = getSysTotalMemoryMb();
+        workerInfos[0].nodeIndex = 0;
+
+        // Worker nodes
+        for (NnUint i = 0; i < effectiveNWorkers; i++) {
+            if (sysInfoArr != nullptr) {
+                std::strncpy(workerInfos[i + 1].hostname, sysInfoArr[i].displayHostname, sizeof(workerInfos[i + 1].hostname) - 1);
+                workerInfos[i + 1].cpuCores = sysInfoArr[i].cpuCores;
+                workerInfos[i + 1].cpuMhz = sysInfoArr[i].cpuMhz;
+                workerInfos[i + 1].totalMemoryMb = sysInfoArr[i].totalMemoryMb;
+            } else {
+                std::strncpy(workerInfos[i + 1].hostname, effectiveWorkerHosts[i], sizeof(workerInfos[i + 1].hostname) - 1);
+            }
+            workerInfos[i + 1].nodeIndex = i + 1;
+        }
+
+        AppInferenceContext context;
+        context.args = args;
+        context.header = &header;
+        context.inference = &inference;
+        context.sampler = &sampler;
+        context.tokenizer = &tokenizer;
+        context.network = network;
+        context.executor = &executor;
+        context.workers = workerInfos;
+        context.nWorkerInfos = nWorkerInfos;
+        context.pointsFile = args->pointsFile;
+
+        bool networkError = false;
+        try {
+            handler(&context);
+            inference.finish();
+        } catch (const NnTransferSocketException &e) {
+            printf("🔄 Worker disconnected: %s\n", e.what());
+            networkError = true;
+        }
+
+        delete[] workerInfos;
+
+        if (ownedWorkerInfo) {
+            for (NnUint i = 0; i < effectiveNWorkers; i++)
+                delete[] effectiveWorkerHosts[i];
+            delete[] effectiveWorkerHosts;
+            delete[] effectiveWorkerPorts;
+            delete[] cacheValidArr;
+            cacheValidArr = nullptr;
+            delete[] sysInfoArr;
+            sysInfoArr = nullptr;
+        }
+
+        firstIteration = false;
+
+        // Exit loop: normal completion or legacy mode (no auto-reshard)
+        if (!networkError || !discoveryMode) break;
+
+        printf("🔄 Resharding... waiting for workers to reconnect\n");
     }
-
-    AppInferenceContext context;
-    context.args = args;
-    context.header = &header;
-    context.inference = &inference;
-    context.sampler = &sampler;
-    context.tokenizer = &tokenizer;
-    context.network = network;
-    context.executor = &executor;
-
-    handler(&context);
-
-    inference.finish();
 }
 
 void runWorkerApp(AppCliArgs *args) {
     while (true) {
-        std::unique_ptr<NnNetwork> networkPtr = NnNetwork::serve(args->host, args->port);
+        // Discovery registration (if --server is specified)
+        WorkerRegistrationResult regResult;
+        regResult.nodeIndex = 1;
+        regResult.nNodes = 2;
+        regResult.modelHash = 0;
+        regResult.usedCache = false;
+
+        if (args->serverHost != nullptr) {
+            try {
+                regResult = registerWithServer(args->serverHost, args->serverPort,
+                                               args->port, args->cacheDir);
+            } catch (const NnConnectionSocketException &e) {
+                printf("🔍 Cannot reach server %s:%u: %s. Retrying...\n",
+                       args->serverHost, args->serverPort, e.what());
+                continue;
+            }
+        }
+
+        // Create weight cache object if cache directory and model info are available
+        std::unique_ptr<NnWorkerWeightCache> weightCache;
+        if (args->cacheDir != nullptr && regResult.modelHash != 0) {
+            weightCache.reset(new NnWorkerWeightCache(
+                args->cacheDir, regResult.modelHash, regResult.nNodes, regResult.nodeIndex));
+        }
+
+        std::unique_ptr<NnNetwork> networkPtr;
+        try {
+            networkPtr = NnNetwork::serve(args->host, args->port);
+        } catch (const std::exception &e) {
+            printf("🚨 Cannot start server on %s:%u: %s\n", args->host, args->port, e.what());
+            break;
+        }
         NnNetwork *network = networkPtr.get();
 
         NnWorkerConfigReader configReader(network);
@@ -322,7 +465,7 @@ void runWorkerApp(AppCliArgs *args) {
         NnNetworkNodeSynchronizer synchronizer(network, &execution, &netConfig, &nodeConfig);
         NnExecutor executor(&netConfig, &nodeConfig, &devices, &execution, &synchronizer, false);
 
-        NnWorkerWeightReader weightReader(&executor, network);
+        NnWorkerWeightReader weightReader(&executor, network, weightCache.get(), regResult.usedCache);
         weightReader.read();
 
         WorkerLlmInference inference(&execution, network);
@@ -361,5 +504,8 @@ void runWorkerApp(AppCliArgs *args) {
                 break;
             }
         }
+
+        // If using discovery mode: loop and re-register with server
+        // If legacy mode: loop to accept next server connection
     }
 }

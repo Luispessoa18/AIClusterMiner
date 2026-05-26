@@ -1,3 +1,4 @@
+#include <string>
 #include "nn-vulkan.hpp"
 
 #define DEBUG_VULKAN_BUFFERS false

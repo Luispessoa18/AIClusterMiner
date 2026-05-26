@@ -76,6 +76,55 @@ You always need the root node and you can add 2^n - 1 worker nodes to speed up t
 * `dllama worker` - run the worker node,
 * `dllama-api` - run the API server.
 
+### 🚀 Running the Server (API Mode)
+
+**Static workers** (classic, explicit list):
+
+```sh
+./dllama-api \
+  --model dllama_model_llama3_2_3b_instruct_q40.m \
+  --tokenizer dllama_tokenizer_llama3_2_3b_instruct_q40.t \
+  --buffer-float-type q80 \
+  --nthreads 4 \
+  --port 9990 \
+  --workers 10.0.0.2:9999 10.0.0.3:9999
+```
+
+**Dynamic worker discovery** (workers self-register — no need to list IPs upfront):
+
+```sh
+./dllama-api \
+  --model dllama_model_llama3_2_3b_instruct_q40.m \
+  --tokenizer dllama_tokenizer_llama3_2_3b_instruct_q40.t \
+  --buffer-float-type q80 \
+  --nthreads 4 \
+  --port 9990 \
+  --min-workers 2 \
+  --points-file /tmp/dllama_points.json
+```
+
+With `--min-workers`, the server waits for that many workers to connect before starting inference. Worker IPs are discovered automatically. The optional `--points-file` persists a per-worker contribution score across sessions.
+
+### 🔹 Running the Worker
+
+**Static mode** (server lists this worker explicitly via `--workers`):
+
+```sh
+./dllama worker --port 9999 --nthreads 4
+```
+
+**Discovery mode** (worker self-registers with the server):
+
+```sh
+./dllama worker \
+  --port 9999 \
+  --nthreads 4 \
+  --server 10.0.0.1:9990 \
+  --cache-dir /tmp/dllama_cache
+```
+
+With `--server`, the worker connects to the root node and announces itself. If `--cache-dir` is set, the worker stores the model weights locally after the first session and reuses them on reconnect — the server detects the valid cache and skips retransmitting weights.
+
 <details>
 
 <summary>🎹 Supported Arguments</summary>
@@ -87,7 +136,8 @@ You always need the root node and you can add 2^n - 1 worker nodes to speed up t
 | `--model <path>`             | Path to model.                                                   | `dllama_model_meta-llama-3-8b_q40.m`   |
 | `--tokenizer <path>`         | Tokenizer to model.                                              | `dllama_tokenizer_llama3.t`            |
 | `--buffer-float-type <type>` | Float precision of synchronization.                              | `q80`                                  |
-| `--workers <workers>`        | Addresses of workers (ip:port), separated by space.              | `10.0.0.1:9999 10.0.0.2:9999`          |
+| `--workers <workers>`        | Addresses of workers (ip:port), separated by space.              | `10.0.0.2:9999 10.0.0.3:9999`          |
+| `--min-workers <n>`          | Wait for N workers to self-register (enables discovery mode).    | `2`                                    |
 | `--max-seq-len <n>`          | The maximum sequence length, it helps to reduce the RAM usage.   | `4096`                                 |
 
 Inference, Chat, Worker, API
@@ -100,8 +150,22 @@ Worker, API
 
 | Argument                     | Description                       | Example           |
 | ---------------------------- | --------------------------------- | ----------------- |
-| `--host <addr>`              | Binding address.                  | `127.0.0.1`       |
+| `--host <addr>`              | Binding address.                  | `0.0.0.0`         |
 | `--port <port>`              | Binding port.                     | `9999`            |
+
+Worker
+
+| Argument                     | Description                                                                       | Example                  |
+| ---------------------------- | --------------------------------------------------------------------------------- | ------------------------ |
+| `--server <host:port>`       | Root node address to self-register with (enables discovery mode).                 | `10.0.0.1:9990`          |
+| `--cache-dir <path>`         | Directory to persist model weights between sessions (skips retransmit on reuse).  | `/tmp/dllama_cache`      |
+
+API
+
+| Argument                     | Description                                                             | Example                        |
+| ---------------------------- | ----------------------------------------------------------------------- | ------------------------------ |
+| `--points-file <path>`       | JSON file to persist per-worker contribution points across sessions.    | `/tmp/dllama_points.json`      |
+| `--net-turbo <0\|1>`         | Enable non-blocking sockets for faster sync (default: 1).               | `1`                            |
 
 Inference
 

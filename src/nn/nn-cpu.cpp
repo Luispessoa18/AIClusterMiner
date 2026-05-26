@@ -1,3 +1,4 @@
+#include <string>
 #include "nn-cpu.hpp"
 #include "nn-cpu-ops.hpp"
 #include <cassert>

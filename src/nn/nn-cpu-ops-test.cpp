@@ -1,3 +1,4 @@
+#include <string>
 #include "nn-cpu-ops.cpp"
 #include <vector>
 

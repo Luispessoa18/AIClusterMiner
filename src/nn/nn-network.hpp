@@ -2,8 +2,47 @@
 #define NN_NETWORK_H
 
 #include "nn-executor.hpp"
+#include "nn-worker-cache.hpp"
+#include <cstdint>
 
 #define ROOT_SOCKET_INDEX 0
+
+// Worker discovery protocol magic values
+#define WORKER_HELLO_MAGIC  0x574F524BU
+#define WORKER_ASSIGN_MAGIC 0x41535347U
+// Sent by server as nameSize=0xFFFFFFFF in weight stream → worker has valid cache
+#define WEIGHT_CACHE_SKIP   0xFFFFFFFFU
+
+struct WorkerRegistrationResult {
+    NnUint nodeIndex;
+    NnUint nNodes;
+    uint64_t modelHash;
+    bool usedCache;
+};
+
+struct WorkerSysInfo {
+    char displayHostname[256]; // sent by worker in HELLO
+    char connectHost[256];     // IP from getpeername on server side
+    NnUint listenPort;
+    NnUint cpuCores;
+    NnUint cpuMhz;
+    NnUint totalMemoryMb;
+};
+
+// Cross-platform system info helpers
+NnUint getSysCpuCores();
+NnUint getSysCpuMhz();
+NnUint getSysTotalMemoryMb();
+void getSysHostname(char *buf, NnUint size);
+
+// Server: accept nWorkers registrations on host:port, fill outHosts/outPorts/outCacheValid/outSysInfo
+void acceptWorkerRegistrations(const char *host, NnUint port, NnUint nWorkers,
+    uint64_t modelHash, char **outHosts, NnUint *outPorts, bool *outCacheValid,
+    WorkerSysInfo *outSysInfo);
+
+// Worker: register with server at serverHost:serverPort, listen on myListenPort
+WorkerRegistrationResult registerWithServer(const char *serverHost, NnUint serverPort,
+    NnUint myListenPort, const char *cacheDir);
 
 void initSockets();
 void cleanupSockets();
@@ -107,9 +146,11 @@ private:
     NnUint nNodes;
     NnByte *temp;
     NnSize tempSize;
+    bool *workerCacheValid; // size = nNodes - 1, indexed by (nodeIndex - 1)
 public:
     NnRootWeightLoader(NnExecutor *executor, NnNetwork *network, NnUint nNodes);
     ~NnRootWeightLoader();
+    void setWorkerCacheValid(NnUint nodeIndex, bool valid);
     void writeWeight(NnUint nodeIndex, const char *opName, NnUint opIndex, NnSize offset, NnSize nBytes, NnByte *weight);
     NnSize loadRoot(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight);
     NnSize loadAll(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight);
@@ -117,7 +158,8 @@ public:
     NnSize loadColMatmulSlices(const char *opName, const NnUint opIndex, const NnUint expertIndex, NnColMatmulSlice *slice, NnByte *weight);
     void finish();
 private:
-    void allocate(NnSize size);};
+    void allocate(NnSize size);
+};
 
 class NnWorkerWeightReader {
 private:
@@ -125,8 +167,11 @@ private:
     NnNetwork *network;
     NnByte *temp;
     NnUint tempSize;
+    NnWorkerWeightCache *cache; // may be null
+    bool useCache;              // if true, skip network and load from cache
 public:
     NnWorkerWeightReader(NnExecutor *executor, NnNetwork *network);
+    NnWorkerWeightReader(NnExecutor *executor, NnNetwork *network, NnWorkerWeightCache *cache, bool useCache);
     ~NnWorkerWeightReader();
     void read();
 private:

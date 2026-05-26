@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++11 -Werror -Wformat -Werror=format-security 
+CXXFLAGS = -std=c++17 -Werror -Wformat -Werror=format-security 
 
 ifndef TERMUX_VERSION
 	CXXFLAGS += -march=native -mtune=native
@@ -51,6 +51,8 @@ nn-executor.o: src/nn/nn-executor.cpp
 	$(CXX) $(CXXFLAGS) -c $^ -o $@
 nn-network.o: src/nn/nn-network.cpp
 	$(CXX) $(CXXFLAGS) -c $^ -o $@
+nn-worker-cache.o: src/nn/nn-worker-cache.cpp
+	$(CXX) $(CXXFLAGS) -c $^ -o $@
 llamafile-sgemm.o: src/nn/llamafile/sgemm.cpp
 	$(CXX) $(CXXFLAGS) -c $^ -o $@
 nn-cpu-ops.o: src/nn/nn-cpu-ops.cpp
@@ -84,7 +86,7 @@ app.o: src/app.cpp
 	$(CXX) $(CXXFLAGS) -c $^ -o $@
 tokenizer-test: src/tokenizer-test.cpp nn-quants.o nn-core.o llamafile-sgemm.o nn-cpu-ops.o tokenizer.o
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LIBS)
-dllama: src/dllama.cpp nn-quants.o nn-core.o nn-executor.o nn-network.o llamafile-sgemm.o nn-cpu-ops.o nn-cpu.o tokenizer.o llm.o app.o ${DEPS}
+dllama: src/dllama.cpp nn-quants.o nn-core.o nn-executor.o nn-network.o nn-worker-cache.o llamafile-sgemm.o nn-cpu-ops.o nn-cpu.o tokenizer.o llm.o app.o ${DEPS}
 	$(CXX) $(CXXFLAGS) $(filter-out %.spv, $^) -o $@ $(LIBS)
-dllama-api: src/dllama-api.cpp nn-quants.o nn-core.o nn-executor.o nn-network.o llamafile-sgemm.o nn-cpu-ops.o nn-cpu.o tokenizer.o llm.o app.o ${DEPS}
+dllama-api: src/dllama-api.cpp nn-quants.o nn-core.o nn-executor.o nn-network.o nn-worker-cache.o llamafile-sgemm.o nn-cpu-ops.o nn-cpu.o tokenizer.o llm.o app.o ${DEPS}
 	$(CXX) $(CXXFLAGS) $(filter-out %.spv, $^) -o $@ $(LIBS)
