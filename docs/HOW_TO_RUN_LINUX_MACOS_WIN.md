@@ -1,4 +1,4 @@
-# How to Run Distributed Llama on 💻 Linux, MacOS or Windows
+# How to Run AIClusterMiner on 💻 Linux, MacOS or Windows
 
 This article describes how to run Distributed Llama on 4 devices, but you can also run it on 1, 2, 4, 8... devices. Please adjust the commands and topology according to your configuration.
 
@@ -30,11 +30,11 @@ This article describes how to run Distributed Llama on 4 devices, but you can al
 
 2. Connect **🔸🔹 ALL** devices to your **🔀 SWITCH OR ROUTER** via Ethernet cable. If you're using only two devices, it's better to connect them directly without a switch.
 
-3. Clone this repository and compile Distributed Llama on **🔸🔹 ALL** devices:
+3. Clone this repository and compile AIClusterMiner on **🔸🔹 ALL** devices:
 
 ```sh
-git clone https://github.com/b4rtaz/distributed-llama.git
-cd distributed-llama
+git clone https://github.com/Luispessoa18/AIClusterMiner.git
+cd AIClusterMiner
 make dllama
 make dllama-api
 ```

@@ -1,4 +1,4 @@
-# How to Run Distributed Llama on 🍓 Raspberry Pi
+# How to Run AIClusterMiner on 🍓 Raspberry Pi
 
 This article describes how to run Distributed Llama on 4 Raspberry Pi devices, but you can also run it on 1, 2, 4, 8... devices. Please adjust the commands and topology according to your configuration.
 
@@ -28,11 +28,11 @@ ssh user@raspberrypi4.local
 sudo apt install git
 ```
 
-5. Clone this repository and compile Distributed Llama on **🔸🔹 ALL** devices:
+5. Clone this repository and compile AIClusterMiner on **🔸🔹 ALL** devices:
 
 ```sh
-git clone https://github.com/b4rtaz/distributed-llama.git
-cd distributed-llama
+git clone https://github.com/Luispessoa18/AIClusterMiner.git
+cd AIClusterMiner
 make dllama
 make dllama-api
 ```

@@ -1,8 +1,8 @@
-# How to Run Distributed Llama on 🧠 GPU
+# How to Run AIClusterMiner on 🧠 GPU
 
-Distributed Llama can run on GPU devices using Vulkan API. This article describes how to build and run the project on GPU.
+AIClusterMiner can run on GPU devices using Vulkan API. This article describes how to build and run the project on GPU.
 
-Before you start here, please check how to build and run Distributed Llama on CPU:
+Before you start here, please check how to build and run AIClusterMiner on CPU:
 * [🍓 How to Run on Raspberry Pi](./HOW_TO_RUN_RASPBERRYPI.md)
 * [💻 How to Run on Linux, MacOS or Windows](./HOW_TO_RUN_LINUX_MACOS_WIN.md)
 

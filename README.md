@@ -82,8 +82,8 @@ You always need the root node and you can add 2^n - 1 worker nodes to speed up t
 
 ```sh
 ./dllama-api \
-  --model dllama_model_llama3_2_3b_instruct_q40.m \
-  --tokenizer dllama_tokenizer_llama3_2_3b_instruct_q40.t \
+  --model models/llama3_2_3b_instruct_q40/dllama_model_llama3_2_3b_instruct_q40.m \
+  --tokenizer models/llama3_2_3b_instruct_q40/dllama_tokenizer_llama3_2_3b_instruct_q40.t \
   --buffer-float-type q80 \
   --nthreads 4 \
   --port 9990 \
@@ -94,8 +94,8 @@ You always need the root node and you can add 2^n - 1 worker nodes to speed up t
 
 ```sh
 ./dllama-api \
-  --model dllama_model_llama3_2_3b_instruct_q40.m \
-  --tokenizer dllama_tokenizer_llama3_2_3b_instruct_q40.t \
+  --model models/llama3_2_3b_instruct_q40/dllama_model_llama3_2_3b_instruct_q40.m \
+  --tokenizer models/llama3_2_3b_instruct_q40/dllama_tokenizer_llama3_2_3b_instruct_q40.t \
   --buffer-float-type q80 \
   --nthreads 4 \
   --port 9990 \
@@ -205,4 +205,3 @@ This project is released under the MIT license.
   commit = {7eb77ca93ec0d502e28d36b6fb20039b449cbea4}
 }
 ```
-# AIClusterMiner

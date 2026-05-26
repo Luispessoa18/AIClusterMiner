@@ -254,6 +254,10 @@ bool WorkerLlmInference::tryReadControlPacket() {
 }
 
 void runInferenceApp(AppCliArgs *args, void (*handler)(AppInferenceContext *context)) {
+    if (args->modelPath == nullptr)
+        throw std::runtime_error("Missing --model argument");
+    if (args->tokenizerPath == nullptr)
+        throw std::runtime_error("Missing --tokenizer argument");
     LlmHeader header = loadLlmHeader(args->modelPath, args->maxSeqLen, args->syncType);
     if (header.weightType == F_Q40 && header.syncType != F_Q80)
         throw std::runtime_error("This version supports only Q40 weights with Q80 sync type");
