@@ -1,5 +1,7 @@
 # AIClusterMiner
 
+> This project is a fork and extension of [Distributed Llama](https://github.com/b4rtaz/distributed-llama) by [Bartłomiej Tadych (b4rtaz)](https://github.com/b4rtaz). All original work, architecture, and core inference engine are credited to the original author. This repository adds worker auto-discovery, weight caching, and a contribution points system on top of that foundation.
+
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/b4rtaz/distributed-llama/.github%2Fworkflows%2Fmain.yml?style=flat-square)](https://github.com/b4rtaz/distributed-llama/actions) [![License: MIT](https://img.shields.io/github/license/mashape/apistatus.svg?style=flat-square)](/LICENSE) [![Discord](https://discordapp.com/api/guilds/1245814812353495070/widget.png?style=shield)](https://n4no.com/projects/distributedLlama/discord.php)
 
 Connect home devices into a powerful cluster to accelerate LLM inference. More devices mean faster performance, leveraging tensor parallelism and high-speed synchronization over Ethernet.
