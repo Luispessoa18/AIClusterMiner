@@ -1,6 +1,4 @@
-![Distributed Llama](.github/cover.png)
-
-# Distributed Llama
+# AIClusterMiner
 
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/b4rtaz/distributed-llama/.github%2Fworkflows%2Fmain.yml?style=flat-square)](https://github.com/b4rtaz/distributed-llama/actions) [![License: MIT](https://img.shields.io/github/license/mashape/apistatus.svg?style=flat-square)](/LICENSE) [![Discord](https://discordapp.com/api/guilds/1245814812353495070/widget.png?style=shield)](https://n4no.com/projects/distributedLlama/discord.php)
 
