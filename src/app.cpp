@@ -352,17 +352,8 @@ void runInferenceApp(AppCliArgs *args, void (*handler)(AppInferenceContext *cont
             for (NnUint i = 0; i < effectiveNWorkers; i++)
                 weightLoader.setWorkerCacheValid(i + 1, cacheValidArr[i]);
         }
-        loadLlmNetWeight(args->modelPath, &net, &weightLoader);
 
         RootLlmInference inference(&net, &execution, &executor, network);
-
-        if (network != nullptr) {
-            network->resetStats();
-            if (args->netTurbo) {
-                network->setTurbo(true);
-                printf("🚁 Network is in non-blocking mode\n");
-            }
-        }
 
         // Build per-node runtime info for the UI/points system
         NnUint nWorkerInfos = nNodes;
@@ -388,6 +379,16 @@ void runInferenceApp(AppCliArgs *args, void (*handler)(AppInferenceContext *cont
             workerInfos[i + 1].nodeIndex = i + 1;
         }
 
+        // Prepare loading state — HTTP server starts immediately and shows progress
+        LoadingState loadingState;
+        loadingState.totalLayers = (int)net.header->nLayers;
+        for (NnUint i = 0; i < effectiveNWorkers; i++) {
+            LoadingState::WorkerInfo wi;
+            wi.nodeIndex = i + 1;
+            wi.cacheHit = (cacheValidArr != nullptr) ? cacheValidArr[i] : false;
+            loadingState.workers.push_back(wi);
+        }
+
         AppInferenceContext context;
         context.args = args;
         context.header = &header;
@@ -399,15 +400,39 @@ void runInferenceApp(AppCliArgs *args, void (*handler)(AppInferenceContext *cont
         context.workers = workerInfos;
         context.nWorkerInfos = nWorkerInfos;
         context.pointsFile = args->pointsFile;
+        context.loadingState = &loadingState;
+
+        // Load weights in a background thread so the HTTP server can show progress
+        std::thread loadingThread([&]() {
+            try {
+                loadLlmNetWeight(args->modelPath, &net, &weightLoader,
+                    [&](NnUint layer) {
+                        loadingState.loadedLayers.store((int)(layer + 1), std::memory_order_relaxed);
+                    });
+                if (network != nullptr) {
+                    network->resetStats();
+                    if (args->netTurbo) {
+                        network->setTurbo(true);
+                        printf("🚁 Network is in non-blocking mode\n");
+                    }
+                }
+                loadingState.ready.store(true, std::memory_order_release);
+            } catch (const std::exception &e) {
+                printf("🚨 Weight loading failed: %s\n", e.what());
+                loadingState.errorMsg = e.what();
+                loadingState.failed.store(true, std::memory_order_release);
+            }
+        });
 
         bool networkError = false;
         try {
             handler(&context);
-            inference.finish();
+            if (loadingState.ready.load()) inference.finish();
         } catch (const NnTransferSocketException &e) {
             printf("🔄 Worker disconnected: %s\n", e.what());
             networkError = true;
         }
+        loadingThread.join();
 
         delete[] workerInfos;
 

@@ -1,13 +1,29 @@
 #ifndef APP_HPP
 #define APP_HPP
 
+#include <atomic>
 #include <chrono>
+#include <string>
+#include <vector>
 #include "nn/nn-core.hpp"
 #include "nn/nn-cpu.hpp"
 #include "nn/nn-network.hpp"
 #include "nn/nn-worker-cache.hpp"
 #include "tokenizer.hpp"
 #include "llm.hpp"
+
+struct LoadingState {
+    std::atomic<bool> ready{false};
+    std::atomic<bool> failed{false};
+    std::string errorMsg;
+    std::atomic<int> loadedLayers{0};
+    int totalLayers{0};
+    struct WorkerInfo {
+        NnUint nodeIndex;
+        bool cacheHit;
+    };
+    std::vector<WorkerInfo> workers; // excludes root
+};
 
 struct WorkerRuntimeInfo {
     char hostname[256];
@@ -116,6 +132,7 @@ typedef struct {
     WorkerRuntimeInfo *workers;  // [0] = root, [1..n] = registered workers
     NnUint nWorkerInfos;
     const char *pointsFile;
+    LoadingState *loadingState;  // non-null while/after weight loading
 } AppInferenceContext;
 
 void runInferenceApp(AppCliArgs *args, void (*handler)(AppInferenceContext *context));

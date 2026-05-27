@@ -61,7 +61,8 @@ NnFp16 convertF32ToF16Impl(const float x) {
         m =  0;
         e += 1;
     }
-    assert(e <= 30);
+    if (e > 30)
+        return s | 0x7c00; // overflow → F16 infinity (matches ARM Neon / x86 intrinsic behavior)
     return s | (e << 10) | (m >> 13);
 }
 

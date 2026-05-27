@@ -309,6 +309,63 @@ setInterval(fetchWorkers, 5000);
 </html>
 )HTML";
 
+static const char *LOADING_HTML = R"HTML(<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dllama - Loading</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: #111; color: #ddd; height: 100dvh; display: flex; align-items: center; justify-content: center; }
+.card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 32px; width: 400px; }
+h1 { font-size: 17px; font-weight: 600; margin-bottom: 20px; color: #eee; }
+.track { background: #2a2a2a; border-radius: 6px; height: 8px; margin-bottom: 8px; overflow: hidden; }
+.bar { background: #1a3d6e; height: 100%; width: 0%; transition: width 0.4s ease; border-radius: 6px; }
+.lbl { font-size: 12px; color: #666; margin-bottom: 20px; }
+.worker { background: #1f1f1f; border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px 14px; margin-top: 8px; display: flex; align-items: center; gap: 10px; }
+.wname { font-size: 13px; color: #aaa; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; flex-shrink: 0; }
+.badge-loading { background: #0d2a3e; color: #75c8ff; }
+.badge-cached  { background: #0d2e14; color: #75ff9c; }
+.errmsg { color: #ff7575; font-size: 13px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Loading model weights...</h1>
+  <div class="track"><div class="bar" id="bar"></div></div>
+  <div class="lbl" id="lbl">Connecting...</div>
+  <div id="workers"></div>
+  <div id="err" class="errmsg"></div>
+</div>
+<script>
+async function poll() {
+  try {
+    var d = JSON.parse(await (await fetch('/api/loading-status')).text());
+    if (d.ready) { location.replace('/'); return; }
+    if (d.failed) { document.getElementById('err').textContent = 'Error: ' + (d.error || 'unknown'); return; }
+    var pct = d.totalLayers > 0 ? Math.round(d.loadedLayers / d.totalLayers * 100) : 0;
+    document.getElementById('bar').style.width = pct + '%';
+    document.getElementById('lbl').textContent = d.totalLayers > 0
+      ? 'Layer ' + d.loadedLayers + ' / ' + d.totalLayers + ' (' + pct + '%)'
+      : 'Waiting...';
+    document.getElementById('workers').innerHTML = (d.workers || []).map(function(w) {
+      var host = w.hostname ? ' - ' + w.hostname : '';
+      var cls = w.cacheHit ? 'badge-cached' : 'badge-loading';
+      var txt = w.cacheHit ? 'cache hit' : 'loading';
+      return '<div class="worker"><span class="wname">Worker ' + w.nodeIndex + host + '</span>'
+           + '<span class="badge ' + cls + '">' + txt + '</span></div>';
+    }).join('');
+  } catch(e) {}
+  setTimeout(poll, 500);
+}
+poll();
+</script>
+</body>
+</html>
+)HTML";
+
 static const char *DOCS_HTML = R"HTML(<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1201,6 +1258,35 @@ void handleWorkersRequest(HttpRequest& request, AppInferenceContext *context, do
     request.writeJson(j.str());
 }
 
+void handleLoadingStatusRequest(HttpRequest& request, AppInferenceContext *context) {
+    const LoadingState *ls = context->loadingState;
+    std::ostringstream j;
+    bool ready = ls && ls->ready.load(std::memory_order_acquire);
+    bool failed = ls && ls->failed.load(std::memory_order_acquire);
+    int loaded = ls ? ls->loadedLayers.load(std::memory_order_relaxed) : 0;
+    int total = ls ? ls->totalLayers : 0;
+    j << "{\"ready\":" << (ready ? "true" : "false")
+      << ",\"failed\":" << (failed ? "true" : "false")
+      << ",\"error\":\"" << (ls && failed ? ls->errorMsg : "") << "\""
+      << ",\"loadedLayers\":" << loaded
+      << ",\"totalLayers\":" << total
+      << ",\"workers\":[";
+    if (ls) {
+        for (size_t i = 0; i < ls->workers.size(); i++) {
+            if (i > 0) j << ",";
+            const auto &w = ls->workers[i];
+            const char *hostname = "";
+            if (context->workers && w.nodeIndex < context->nWorkerInfos)
+                hostname = context->workers[w.nodeIndex].hostname;
+            j << "{\"nodeIndex\":" << w.nodeIndex
+              << ",\"cacheHit\":" << (w.cacheHit ? "true" : "false")
+              << ",\"hostname\":\"" << hostname << "\"}";
+        }
+    }
+    j << "]}";
+    request.writeJson(j.str());
+}
+
 // ─── Main server callback ─────────────────────────────────────────────────
 
 static void server(AppInferenceContext *context) {
@@ -1224,7 +1310,14 @@ static void server(AppInferenceContext *context) {
         {
             "/",
             HttpMethod::METHOD_GET,
-            [](HttpRequest& req) { req.writeHtml(CHAT_HTML, strlen(CHAT_HTML)); }
+            [context](HttpRequest& req) {
+                LoadingState *ls = context->loadingState;
+                bool ready = !ls || ls->ready.load(std::memory_order_acquire);
+                if (ready)
+                    req.writeHtml(CHAT_HTML, strlen(CHAT_HTML));
+                else
+                    req.writeHtml(LOADING_HTML, strlen(LOADING_HTML));
+            }
         },
         {
             "/docs",
@@ -1237,9 +1330,22 @@ static void server(AppInferenceContext *context) {
             [](HttpRequest& req) { req.writeHtml(DOCS_HTML, strlen(DOCS_HTML)); }
         },
         {
+            "/api/loading-status",
+            HttpMethod::METHOD_GET,
+            [context](HttpRequest& req) { handleLoadingStatusRequest(req, context); }
+        },
+        {
             "/v1/chat/completions",
             HttpMethod::METHOD_POST,
-            std::bind(&handleCompletionsRequest, std::placeholders::_1, &api)
+            [context, &api](HttpRequest& req) {
+                LoadingState *ls = context->loadingState;
+                bool ready = !ls || ls->ready.load(std::memory_order_acquire);
+                if (!ready) {
+                    req.writeJson("{\"error\":{\"message\":\"Model is still loading\",\"type\":\"server_error\"},\"status\":503}");
+                    return;
+                }
+                handleCompletionsRequest(req, &api);
+            }
         },
         {
             "/v1/models",

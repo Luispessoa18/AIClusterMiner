@@ -1,6 +1,7 @@
 #ifndef LLM_HPP
 #define LLM_HPP
 
+#include <functional>
 #include "nn/nn-core.hpp"
 #include "nn/nn-executor.hpp"
 #include "nn/nn-network.hpp"
@@ -99,7 +100,8 @@ LlmHeader loadLlmHeader(const char* path, const unsigned int maxSeqLen, NnFloatT
 void printLlmHeader(LlmHeader *header);
 LlmNet buildLlmNet(LlmHeader *h, NnUint nNodes, NnUint nBatches);
 void releaseLlmNet(LlmNet *net);
-void loadLlmNetWeight(const char* path, LlmNet *net, NnWeightLoader *loader);
+void loadLlmNetWeight(const char* path, LlmNet *net, NnWeightLoader *loader,
+                      std::function<void(NnUint)> onLayerLoaded = nullptr);
 void splitModelFile(const char* path, size_t targetChunkSize = 100ULL * 1024 * 1024);
 
 #endif

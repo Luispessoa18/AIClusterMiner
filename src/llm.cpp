@@ -730,7 +730,8 @@ void releaseLlmNet(LlmNet *net) {
     delete[] net->nodeConfigs;
 }
 
-void loadLlmNetWeight(const char *path, LlmNet *net, NnWeightLoader *loader) {
+void loadLlmNetWeight(const char *path, LlmNet *net, NnWeightLoader *loader,
+                      std::function<void(NnUint)> onLayerLoaded) {
     bool isChunked = !fileExists(path);
     MmapFile mmapFile;
     NnByte *chunkedData = nullptr;
@@ -805,6 +806,7 @@ void loadLlmNetWeight(const char *path, LlmNet *net, NnWeightLoader *loader) {
 
         if (timer.elapsedMiliseconds() > 10000)
             printf("💿 Loaded %u/%u\n", layerIndex + 1, net->header->nLayers);
+        if (onLayerLoaded) onLayerLoaded(layerIndex);
     }
 
     b += loader->loadAll("final_norm", 0u, net->rmsNormSize.nBytes, b);
