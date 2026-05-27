@@ -619,7 +619,7 @@ GeneratedChat ChatTemplateGenerator::generate(unsigned int nItems, ChatItem* ite
         }
     } else if (type == TEMPLATE_LLAMA3) {
         for (unsigned int i = 0; i < nItems; i++)
-            buffer += "<|start_header_id|>" + items[i].role + "<|end_header_id|>\n\n" + items[i].message + eos;
+            buffer += "<|start_header_id|>" + items[i].role + "<|end_header_id|>\n\n" + items[i].message + "<|eot_id|>";
         if (appendGenerationPrompt)
             buffer += "<|start_header_id|>assistant<|end_header_id|>\n\n";
     } else if (type == TEMPLATE_DEEP_SEEK3) {
