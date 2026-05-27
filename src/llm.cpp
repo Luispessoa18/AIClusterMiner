@@ -13,8 +13,8 @@ static size_t getFileSize64(FILE* f) {
     _fseeki64(f, 0, SEEK_END);
     return (size_t)_ftelli64(f);
 #else
-    fseek(f, 0, SEEK_END);
-    return (size_t)ftell(f);
+    fseeko(f, 0, SEEK_END);
+    return (size_t)ftello(f);
 #endif
 }
 

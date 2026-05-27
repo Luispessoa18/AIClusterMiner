@@ -1,6 +1,7 @@
 #ifndef MMAP_HPP
 #define MMAP_HPP
 
+#include <cstdint>
 #include <cstdio>
 #include <stdexcept>
 #ifdef _WIN32
@@ -22,13 +23,13 @@ struct MmapFile {
 #endif
 };
 
-long seekToEnd(FILE* file) {
+int64_t seekToEnd(FILE* file) {
 #ifdef _WIN32
     _fseeki64(file, 0, SEEK_END);
-    return _ftelli64(file);
+    return (int64_t)_ftelli64(file);
 #else
-    fseek(file, 0, SEEK_END);
-    return ftell(file);
+    fseeko(file, 0, SEEK_END);
+    return (int64_t)ftello(file);
 #endif
 }
 
