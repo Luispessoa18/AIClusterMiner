@@ -541,6 +541,10 @@ void Sampler::setTemp(float temp) {
     this->temperature = temp;
 }
 
+void Sampler::setTopp(float topp) {
+    this->topp = topp;
+}
+
 void Sampler::setSeed(unsigned long long seed) {
     this->rngState = seed;
 }

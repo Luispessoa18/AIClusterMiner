@@ -347,7 +347,7 @@ InferenceParams parseInferenceParams(json &json, float defaultTemperature, float
     params.seed = defaultSeed;
     params.stream = false;
     params.messages = parseChatMessages(json["messages"]);
-    params.max_tokens = -1;
+    params.max_tokens = 256;
     params.tools.clear();
     params.tool_choice = ToolChoice();
 
@@ -355,6 +355,8 @@ InferenceParams parseInferenceParams(json &json, float defaultTemperature, float
         params.stream = json["stream"].get<bool>();
     if (json.contains("temperature"))
         params.temperature = json["temperature"].template get<float>();
+    if (json.contains("top_p"))
+        params.top_p = json["top_p"].template get<float>();
     if (json.contains("seed"))
         params.seed = json["seed"].template get<unsigned long long>();
     if (json.contains("max_tokens"))

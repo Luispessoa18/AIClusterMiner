@@ -31,6 +31,12 @@ typedef unsigned int pos_t;
 
 using json = nlohmann::json;
 
+static const int DEFAULT_API_MAX_TOKENS = 256;
+static const int HARD_API_MAX_TOKENS = 4096;
+static int lastPromptTokens = 0;
+static int lastCompletionTokens = 0;
+static int lastTotalTokens = 0;
+
 // ─── Points persistence ────────────────────────────────────────────────────
 
 static void loadPoints(const char *path, WorkerRuntimeInfo *workers, NnUint n) {
@@ -83,6 +89,12 @@ body { font-family: system-ui, sans-serif; background: #111; color: #ddd; height
 #sidebar { width: 260px; background: #1a1a1a; border-right: 1px solid #2a2a2a; display: flex; flex-direction: column; padding: 12px; gap: 8px; overflow-y: auto; flex-shrink: 0; }
 #sidebar h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-bottom: 2px; }
 #speed-badge { background: #0d2d4a; color: #5af; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; display: none; }
+.panel { background: #1e1e1e; border-radius: 8px; padding: 10px 12px; border: 1px solid #2a2a2a; }
+.panel label { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: #aaa; font-size: 12px; margin: 7px 0; }
+.panel input[type="number"] { width: 82px; background: #151515; color: #eee; border: 1px solid #333; border-radius: 6px; padding: 5px 7px; }
+.panel input[type="range"] { width: 100%; }
+.panel input[type="checkbox"] { accent-color: #2d73c5; }
+.stat { color: #888; font-size: 11px; line-height: 1.6; }
 .node-card { background: #1e1e1e; border-radius: 8px; padding: 10px 12px; border: 1px solid #2a2a2a; }
 .node-card .name { font-size: 13px; font-weight: 600; color: #eee; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .node-card .meta { font-size: 11px; color: #666; line-height: 1.7; }
@@ -98,6 +110,7 @@ body { font-family: system-ui, sans-serif; background: #111; color: #ddd; height
 #prompt { flex: 1; background: #222; border: 1px solid #333; border-radius: 10px; padding: 10px 14px; color: #eee; font-size: 14px; resize: none; outline: none; font-family: inherit; min-height: 44px; max-height: 160px; line-height: 1.5; }
 #prompt:focus { border-color: #3a5a8a; }
 #send { background: #1a3d6e; color: #d0e4ff; border: none; border-radius: 10px; padding: 10px 22px; cursor: pointer; font-size: 14px; font-weight: 600; flex-shrink: 0; height: 44px; }
+#stop { background: #4a1d1d; color: #ffd8d8; border: none; border-radius: 10px; padding: 10px 16px; cursor: pointer; font-size: 14px; font-weight: 600; flex-shrink: 0; height: 44px; display: none; }
 #send:hover:not(:disabled) { background: #234e8c; }
 #send:disabled { opacity: 0.4; cursor: default; }
 </style>
@@ -106,6 +119,20 @@ body { font-family: system-ui, sans-serif; background: #111; color: #ddd; height
 <div id="sidebar">
   <h2>Nodes</h2>
   <div id="speed-badge"></div>
+  <div class="panel">
+    <h2>Generation</h2>
+    <label>Max tokens <input id="max-tokens" type="number" min="1" max="4096" value="256"></label>
+    <label>Temperature <span id="temperature-value">0.2</span></label>
+    <input id="temperature" type="range" min="0" max="2" step="0.05" value="0.2">
+    <label>Top-p <span id="top-p-value">0.9</span></label>
+    <input id="top-p" type="range" min="0" max="1" step="0.05" value="0.9">
+    <label>Seed <input id="seed" type="number" min="0" placeholder="random"></label>
+    <label>Stream <input id="stream" type="checkbox"></label>
+  </div>
+  <div class="panel">
+    <h2>Last reply</h2>
+    <div id="last-usage" class="stat">No reply yet</div>
+  </div>
   <div id="nodes-list"><div style="color:#555;font-size:12px;padding:4px 0">Loading...</div></div>
 </div>
 <div id="chat">
@@ -113,11 +140,13 @@ body { font-family: system-ui, sans-serif; background: #111; color: #ddd; height
   <div id="input-area">
     <textarea id="prompt" placeholder="Type a message… (Shift+Enter for new line)" rows="1"></textarea>
     <button id="send">Send</button>
+    <button id="stop">Stop</button>
   </div>
 </div>
 <script>
 const history = [];
 let busy = false;
+let controller = null;
 
 function esc(t) {
   return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -159,46 +188,81 @@ async function send() {
   if (last) last.classList.add('typing');
 
   busy = true;
+  controller = new AbortController();
   document.getElementById('send').disabled = true;
+  document.getElementById('stop').style.display = 'block';
 
   try {
     const msgs = history.slice(0, -1).map(m => ({role:m.role, content:m.content}));
+    const stream = document.getElementById('stream').checked;
+    const maxTokens = Math.max(1, Math.min(4096, Number(document.getElementById('max-tokens').value) || 256));
+    const body = {
+      messages: msgs,
+      stream,
+      max_tokens: maxTokens,
+      temperature: Number(document.getElementById('temperature').value),
+      top_p: Number(document.getElementById('top-p').value)
+    };
+    const seed = document.getElementById('seed').value.trim();
+    if (seed) body.seed = Number(seed);
     const res = await fetch('/v1/chat/completions', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({messages: msgs, stream: true})
+      signal: controller.signal,
+      body: JSON.stringify(body)
     });
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    while (true) {
-      const {done, value} = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, {stream:true});
-      const lines = buf.split('\n');
-      buf = lines.pop();
-      for (const line of lines) {
-        if (!line.startsWith('data:')) continue;
-        const data = line.slice(5).trim();
-        if (data === '[DONE]') continue;
-        try {
-          const j = JSON.parse(data);
-          const delta = j?.choices?.[0]?.delta?.content;
-          if (delta) appendToLast(delta);
-        } catch {}
+    if (stream) {
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, {stream:true});
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const data = line.slice(5).trim();
+          if (data === '[DONE]') continue;
+          try {
+            const j = JSON.parse(data);
+            const delta = j?.choices?.[0]?.delta?.content;
+            if (delta) appendToLast(delta);
+          } catch {}
+        }
       }
+    } else {
+      const j = await res.json();
+      history[history.length-1].content = j?.choices?.[0]?.message?.content || '';
+      const usage = j?.usage || {};
+      document.getElementById('last-usage').textContent =
+        `${(usage.prompt_tokens || 0).toLocaleString()} prompt + ${(usage.completion_tokens || 0).toLocaleString()} completion = ${(usage.total_tokens || 0).toLocaleString()} tokens`;
+      renderAll();
     }
   } catch(e) {
-    appendToLast('\n[error: ' + e.message + ']');
+    if (e.name === 'AbortError') appendToLast('\n[stopped]');
+    else appendToLast('\n[error: ' + e.message + ']');
   }
 
   const el = getLastEl();
   if (el) el.classList.remove('typing');
   busy = false;
+  controller = null;
   document.getElementById('send').disabled = false;
+  document.getElementById('stop').style.display = 'none';
+  fetchWorkers();
 }
 
 document.getElementById('send').addEventListener('click', send);
+document.getElementById('stop').addEventListener('click', () => {
+  if (controller) controller.abort();
+});
+for (const id of ['temperature', 'top-p']) {
+  const input = document.getElementById(id);
+  const output = document.getElementById(id + '-value');
+  input.addEventListener('input', () => { output.textContent = input.value; });
+}
 document.getElementById('prompt').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); return; }
   requestAnimationFrame(() => {
@@ -224,9 +288,14 @@ async function fetchWorkers() {
       return `<div class="node-card">
         <div class="name" title="${esc(n.hostname)}">${esc(n.hostname)}</div>
         <div class="meta">${n.cpuCores} cores${mhz}<br>${gb} GB RAM</div>
-        <div class="pts">${n.points.toLocaleString()} pts &middot; ${n.tokensGenerated.toLocaleString()} tokens</div>
+        <div class="pts">${n.points.toLocaleString()} pts</div>
+        <div class="stat">${n.tokensGenerated.toLocaleString()} generated tokens</div>
       </div>`;
     }).join('');
+    if (d.usage && d.usage.totalTokens > 0) {
+      document.getElementById('last-usage').textContent =
+        `${(d.usage.promptTokens || 0).toLocaleString()} prompt + ${(d.usage.completionTokens || 0).toLocaleString()} completion = ${(d.usage.totalTokens || 0).toLocaleString()} tokens`;
+    }
   } catch {}
 }
 
@@ -742,6 +811,9 @@ public:
         }
 
         int nCompletionTokens = pos - promptEndPos;
+        lastPromptTokens = nPromptTokens;
+        lastCompletionTokens = nCompletionTokens;
+        lastTotalTokens = nPromptTokens + nCompletionTokens;
 
         // Track tokens/s for the dashboard
         double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - genStart).count();
@@ -797,7 +869,21 @@ private:
             context->args->temperature,
             context->args->topp,
             context->args->seed);
+        if (params.max_tokens <= 0)
+            params.max_tokens = DEFAULT_API_MAX_TOKENS;
+        if (params.max_tokens > HARD_API_MAX_TOKENS)
+            params.max_tokens = HARD_API_MAX_TOKENS;
+        if (params.temperature < 0.0f)
+            params.temperature = 0.0f;
+        if (params.temperature > 2.0f)
+            params.temperature = 2.0f;
+        if (params.top_p < 0.0f)
+            params.top_p = 0.0f;
+        if (params.top_p > 1.0f)
+            params.top_p = 1.0f;
         context->sampler->setSeed(params.seed);
+        context->sampler->setTemp(params.temperature);
+        context->sampler->setTopp(params.top_p);
         if (!params.tools.empty()) {
             std::string prompt = tryBuildToolsSystemPrompt(params.tools, params.tool_choice);
             ChatMessage toolMessage("system", prompt);
@@ -826,7 +912,11 @@ void handleModelsRequest(HttpRequest& request, const char* modelPath) {
 
 void handleWorkersRequest(HttpRequest& request, AppInferenceContext *context, double tokensPerSec) {
     std::ostringstream j;
-    j << "{\"tokensPerSec\":" << tokensPerSec << ",\"nodes\":[";
+    j << "{\"tokensPerSec\":" << tokensPerSec
+      << ",\"usage\":{\"promptTokens\":" << lastPromptTokens
+      << ",\"completionTokens\":" << lastCompletionTokens
+      << ",\"totalTokens\":" << lastTotalTokens
+      << "},\"nodes\":[";
     for (NnUint i = 0; i < context->nWorkerInfos; i++) {
         if (i > 0) j << ",";
         const WorkerRuntimeInfo &w = context->workers[i];
