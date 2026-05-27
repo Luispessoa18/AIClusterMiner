@@ -350,15 +350,23 @@ void acceptWorkerRegistrations(const char *host, NnUint port, NnUint nWorkers,
 
     // Phase 1: collect HELLO from all workers, keep sockets open
     std::vector<int> clientFds(nWorkers);
-    for (NnUint i = 0; i < nWorkers; i++) {
-        clientFds[i] = acceptSocket(serverSocket.fd);
+    for (NnUint i = 0; i < nWorkers; ) {
+        int fd = acceptSocket(serverSocket.fd);
 
-        NnUint magic;
-        readSocket(clientFds[i], &magic, sizeof(magic));
-        if (magic != WORKER_HELLO_MAGIC) {
-            destroySocket(clientFds[i]);
-            throw std::runtime_error("Worker registration: invalid hello magic");
+        NnUint magic = 0;
+        try {
+            readSocket(fd, &magic, sizeof(magic));
+        } catch (const NnTransferSocketException &) {
+            // Spurious probe connection (e.g. port scanner) — ignore and retry
+            destroySocket(fd);
+            continue;
         }
+        if (magic != WORKER_HELLO_MAGIC) {
+            destroySocket(fd);
+            continue;
+        }
+        clientFds[i] = fd;
+        i++;
 
         NnUint listenPort;
         readSocket(clientFds[i], &listenPort, sizeof(listenPort));
