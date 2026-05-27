@@ -350,47 +350,57 @@ void acceptWorkerRegistrations(const char *host, NnUint port, NnUint nWorkers,
 
     // Phase 1: collect HELLO from all workers, keep sockets open
     std::vector<int> clientFds(nWorkers);
-    for (NnUint i = 0; i < nWorkers; i++) {
-        clientFds[i] = acceptSocket(serverSocket.fd);
+    for (NnUint i = 0; i < nWorkers; ) {
+        int fd = acceptSocket(serverSocket.fd);
 
-        NnUint magic;
-        readSocket(clientFds[i], &magic, sizeof(magic));
-        if (magic != WORKER_HELLO_MAGIC) {
-            destroySocket(clientFds[i]);
-            throw std::runtime_error("Worker registration: invalid hello magic");
+        try {
+            NnUint magic;
+            readSocket(fd, &magic, sizeof(magic));
+            if (magic != WORKER_HELLO_MAGIC) {
+                destroySocket(fd);
+                printf("🔍 Rejected non-worker connection, still waiting...\n");
+                continue;
+            }
+
+            NnUint listenPort;
+            readSocket(fd, &listenPort, sizeof(listenPort));
+            outPorts[i] = listenPort;
+
+            // Read display hostname sent by worker
+            NnUint hostnameLen;
+            readSocket(fd, &hostnameLen, sizeof(hostnameLen));
+            std::vector<char> hostnameBuf(hostnameLen);
+            readSocket(fd, hostnameBuf.data(), hostnameLen);
+            std::strncpy(outSysInfo[i].displayHostname, hostnameBuf.data(), sizeof(outSysInfo[i].displayHostname) - 1);
+            outSysInfo[i].displayHostname[sizeof(outSysInfo[i].displayHostname) - 1] = '\0';
+
+            readSocket(fd, &outSysInfo[i].cpuCores, sizeof(outSysInfo[i].cpuCores));
+            readSocket(fd, &outSysInfo[i].cpuMhz, sizeof(outSysInfo[i].cpuMhz));
+            readSocket(fd, &outSysInfo[i].totalMemoryMb, sizeof(outSysInfo[i].totalMemoryMb));
+            outSysInfo[i].listenPort = listenPort;
+
+            // Get worker IP from the accepted connection
+            struct sockaddr_in clientAddr;
+            socklen_t addrLen = sizeof(clientAddr);
+            getpeername(fd, (struct sockaddr *)&clientAddr, &addrLen);
+            const char *workerIp = inet_ntoa(clientAddr.sin_addr);
+            std::strncpy(outSysInfo[i].connectHost, workerIp, sizeof(outSysInfo[i].connectHost) - 1);
+            outSysInfo[i].connectHost[sizeof(outSysInfo[i].connectHost) - 1] = '\0';
+            outHosts[i] = new char[strlen(workerIp) + 1];
+            strcpy(outHosts[i], workerIp);
+
+            clientFds[i] = fd;
+            i++;
+        } catch (const std::exception &e) {
+            destroySocket(fd);
+            printf("🔍 Rejected connection (%s), still waiting...\n", e.what());
+            continue;
         }
 
-        NnUint listenPort;
-        readSocket(clientFds[i], &listenPort, sizeof(listenPort));
-        outPorts[i] = listenPort;
-
-        // Read display hostname sent by worker
-        NnUint hostnameLen;
-        readSocket(clientFds[i], &hostnameLen, sizeof(hostnameLen));
-        std::vector<char> hostnameBuf(hostnameLen);
-        readSocket(clientFds[i], hostnameBuf.data(), hostnameLen);
-        std::strncpy(outSysInfo[i].displayHostname, hostnameBuf.data(), sizeof(outSysInfo[i].displayHostname) - 1);
-        outSysInfo[i].displayHostname[sizeof(outSysInfo[i].displayHostname) - 1] = '\0';
-
-        readSocket(clientFds[i], &outSysInfo[i].cpuCores, sizeof(outSysInfo[i].cpuCores));
-        readSocket(clientFds[i], &outSysInfo[i].cpuMhz, sizeof(outSysInfo[i].cpuMhz));
-        readSocket(clientFds[i], &outSysInfo[i].totalMemoryMb, sizeof(outSysInfo[i].totalMemoryMb));
-        outSysInfo[i].listenPort = listenPort;
-
-        // Get worker IP from the accepted connection
-        struct sockaddr_in clientAddr;
-        socklen_t addrLen = sizeof(clientAddr);
-        getpeername(clientFds[i], (struct sockaddr *)&clientAddr, &addrLen);
-        const char *workerIp = inet_ntoa(clientAddr.sin_addr);
-        std::strncpy(outSysInfo[i].connectHost, workerIp, sizeof(outSysInfo[i].connectHost) - 1);
-        outSysInfo[i].connectHost[sizeof(outSysInfo[i].connectHost) - 1] = '\0';
-        outHosts[i] = new char[strlen(workerIp) + 1];
-        strcpy(outHosts[i], workerIp);
-
         printf("🔍 Worker %u registered: %s:%u (%s, %u cores, %u MHz, %u MB RAM)\n",
-               i + 1, outHosts[i], outPorts[i],
-               outSysInfo[i].displayHostname, outSysInfo[i].cpuCores,
-               outSysInfo[i].cpuMhz, outSysInfo[i].totalMemoryMb);
+               i, outHosts[i - 1], outPorts[i - 1],
+               outSysInfo[i - 1].displayHostname, outSysInfo[i - 1].cpuCores,
+               outSysInfo[i - 1].cpuMhz, outSysInfo[i - 1].totalMemoryMb);
     }
 
     // Phase 2: send assignments (nodeIndex, nNodes, modelHash) to all workers

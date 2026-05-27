@@ -89,6 +89,7 @@ public:
     ~Sampler();
     int sample(float *logits);
     void setTemp(float temp);
+    void setTopp(float topp);
     void setSeed(unsigned long long rngSeed);
 };
 

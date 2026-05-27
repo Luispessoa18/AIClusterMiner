@@ -39,6 +39,7 @@ AppCliArgs AppCliArgs::parse(int argc, char* *argv, bool requireMode) {
     args.workerPorts = nullptr;
     args.host = "0.0.0.0";
     args.port = 9990;
+    args.workerPort = 0;
     args.minWorkers = 0;
     args.pointsFile = nullptr;
     args.serverHost = nullptr;
@@ -120,6 +121,8 @@ AppCliArgs AppCliArgs::parse(int argc, char* *argv, bool requireMode) {
             args.cacheDir = value;
         } else if (std::strcmp(name, "--port") == 0) {
             args.port = atoi(value);
+        } else if (std::strcmp(name, "--worker-port") == 0) {
+            args.workerPort = atoi(value);
         } else if (std::strcmp(name, "--host") == 0) {
             args.host = value;
         } else if (std::strcmp(name, "--nthreads") == 0) {
@@ -153,6 +156,8 @@ AppCliArgs AppCliArgs::parse(int argc, char* *argv, bool requireMode) {
 
     if (args.nThreads < 1)
         throw std::runtime_error("Number of threads must be at least 1");
+    if (args.workerPort == 0)
+        args.workerPort = args.port;
     return args;
 }
 
@@ -289,7 +294,7 @@ void runInferenceApp(AppCliArgs *args, void (*handler)(AppInferenceContext *cont
             cacheValidArr = new bool[effectiveNWorkers]();
             sysInfoArr = new WorkerSysInfo[effectiveNWorkers]();
 
-            acceptWorkerRegistrations(args->host, args->port, effectiveNWorkers,
+            acceptWorkerRegistrations(args->host, args->workerPort, effectiveNWorkers,
                 modelHash, effectiveWorkerHosts, effectiveWorkerPorts, cacheValidArr, sysInfoArr);
             ownedWorkerInfo = true;
         } else {

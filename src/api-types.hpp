@@ -355,6 +355,10 @@ InferenceParams parseInferenceParams(json &json, float defaultTemperature, float
         params.stream = json["stream"].get<bool>();
     if (json.contains("temperature"))
         params.temperature = json["temperature"].template get<float>();
+    if (json.contains("top_p"))
+        params.top_p = json["top_p"].template get<float>();
+    else if (json.contains("topp"))
+        params.top_p = json["topp"].template get<float>();
     if (json.contains("seed"))
         params.seed = json["seed"].template get<unsigned long long>();
     if (json.contains("max_tokens"))

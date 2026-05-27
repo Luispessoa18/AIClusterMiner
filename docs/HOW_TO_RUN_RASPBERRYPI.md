@@ -68,11 +68,11 @@ sudo nice -n -20 ./dllama worker --port 9999 --nthreads 4
 sudo nice -n -20 ./dllama worker \
   --port 9999 \
   --nthreads 4 \
-  --server 10.0.0.1:9990 \
+  --server 10.0.0.1:9991 \
   --cache-dir /tmp/dllama_cache
 ```
 
-With `--server`, the worker self-registers with the root node. `--cache-dir` saves the received model weights locally so the next reconnect skips the full weight transfer.
+With `--server`, the worker self-registers with the root node. Use the root's `--worker-port` value here when API discovery uses a separate worker port. `--cache-dir` saves the received model weights locally so the next reconnect skips the full weight transfer.
 
 9. Run the inference to test if everything works fine on the **🔸 ROOT** device:
 
@@ -110,6 +110,7 @@ sudo nice -n -20 ./dllama-api \
 sudo nice -n -20 ./dllama-api \
   --host 0.0.0.0 \
   --port 9990 \
+  --worker-port 9991 \
   --model models/llama3_2_3b_instruct_q40/dllama_model_llama3_2_3b_instruct_q40.m \
   --tokenizer models/llama3_2_3b_instruct_q40/dllama_tokenizer_llama3_2_3b_instruct_q40.t \
   --buffer-float-type q80 \
@@ -119,7 +120,7 @@ sudo nice -n -20 ./dllama-api \
   --points-file /tmp/dllama_points.json
 ```
 
-The server waits until the specified number of workers connect, then starts inference. If a worker disconnects it automatically waits for reconnection and reshards.
+The server waits until the specified number of workers connect, then starts inference. `--port` serves the web UI/API and `--worker-port` receives worker discovery registrations. If a worker disconnects it automatically waits for reconnection and reshards.
 
 Now you can connect to the API server from your computer:
 

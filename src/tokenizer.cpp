@@ -541,6 +541,10 @@ void Sampler::setTemp(float temp) {
     this->temperature = temp;
 }
 
+void Sampler::setTopp(float topp) {
+    this->topp = topp;
+}
+
 void Sampler::setSeed(unsigned long long seed) {
     this->rngState = seed;
 }
@@ -652,9 +656,9 @@ GeneratedChat ChatTemplateGenerator::generate(unsigned int nItems, ChatItem* ite
             } else if (items[i].role == "tool") {
                 buffer += "<|im_start|>tool\n" + items[i].message + "<|im_end|>\n";
             }
-            if (appendGenerationPrompt)
-                buffer += "<|im_start|>assistant\n";
         }
+        if (appendGenerationPrompt)
+            buffer += "<|im_start|>assistant\n";
     }
 
     const char *content = buffer.c_str();

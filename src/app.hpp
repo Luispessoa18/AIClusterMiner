@@ -49,7 +49,8 @@ public:
 
     // binding / discovery
     const char *host;
-    NnUint port;
+    NnUint port;         // API/root HTTP port, and worker listen port in worker mode
+    NnUint workerPort;   // server: discovery registration port (0 = reuse --port)
     NnUint minWorkers;   // server: wait for this many workers via discovery (enables dynamic mode)
     char *pointsFile;    // server: JSON file to persist per-node points (nullptr = disable)
 
