@@ -8,6 +8,57 @@
 #include <cerrno>
 #include <stdexcept>
 
+static size_t getFileSize64(FILE* f) {
+#ifdef _WIN32
+    _fseeki64(f, 0, SEEK_END);
+    return (size_t)_ftelli64(f);
+#else
+    fseek(f, 0, SEEK_END);
+    return (size_t)ftell(f);
+#endif
+}
+
+static size_t getChunksTotalSize(const char* basePath, int* nPartsOut) {
+    char buf[2048];
+    size_t total = 0;
+    int n = 0;
+    for (;;) {
+        snprintf(buf, sizeof(buf), "%s.part%03d", basePath, n);
+        FILE* f = fopen(buf, "rb");
+        if (!f) break;
+        total += getFileSize64(f);
+        fclose(f);
+        n++;
+    }
+    if (nPartsOut) *nPartsOut = n;
+    return total;
+}
+
+static NnByte* readChunksToBuffer(const char* basePath, int nParts, size_t totalSize) {
+    NnByte* buf = (NnByte*)malloc(totalSize);
+    if (!buf) throw std::runtime_error("Out of memory for model chunks");
+    NnByte* p = buf;
+    char partPath[2048];
+    for (int i = 0; i < nParts; i++) {
+        snprintf(partPath, sizeof(partPath), "%s.part%03d", basePath, i);
+        FILE* f = fopen(partPath, "rb");
+        if (!f) {
+            free(buf);
+            throw std::runtime_error(std::string("Cannot open chunk: ") + partPath);
+        }
+        size_t partSize = getFileSize64(f);
+        fseek(f, 0, SEEK_SET);
+        size_t readBytes = fread(p, 1, partSize, f);
+        fclose(f);
+        if (readBytes != partSize) {
+            free(buf);
+            throw std::runtime_error(std::string("Read error for chunk: ") + partPath);
+        }
+        p += partSize;
+    }
+    return buf;
+}
+
 static const char *hiddenActToString(LlmHiddenAct act) {
     if (act == HIDDEN_ACT_GELU) return "Gelu";
     if (act == HIDDEN_ACT_SILU) return "Silu";
@@ -45,10 +96,18 @@ LlmHeader loadLlmHeader(const char *path, const NnUint maxSeqLen, NnFloatType sy
     header.normEpsilon = 1e-5f;
     header.moeHiddenDim = 0u;
 
-    std::unique_ptr<FILE, int(*)(FILE *)> fdPtr(fopen(path, "rb"), fclose);
+    bool isChunked = !fileExists(path);
+    std::string openPathStr = path;
+    if (isChunked) {
+        openPathStr = std::string(path) + ".part000";
+        if (!fileExists(openPathStr.c_str()))
+            throw std::runtime_error(std::string("Cannot open model file (") + path + "): not found");
+    }
+
+    std::unique_ptr<FILE, int(*)(FILE *)> fdPtr(fopen(openPathStr.c_str(), "rb"), fclose);
     FILE *fd = fdPtr.get();
     if (fd == NULL)
-        throw std::runtime_error(std::string("Cannot open model file (") + path + std::string("): ") + std::strerror(errno));
+        throw std::runtime_error(std::string("Cannot open model file (") + openPathStr + std::string("): ") + std::strerror(errno));
 
     int magic;
     if (fread(&magic, sizeof(int), 1, fd) != 1)
@@ -109,7 +168,12 @@ LlmHeader loadLlmHeader(const char *path, const NnUint maxSeqLen, NnFloatType sy
     header.qDim = header.headDim * header.nHeads;
     header.kvDim = header.headDim * header.nKvHeads;
     header.syncType = syncType;
-    header.fileSize = (NnSize)seekToEnd(fd);
+    if (isChunked) {
+        int nParts;
+        header.fileSize = (NnSize)getChunksTotalSize(path, &nParts);
+    } else {
+        header.fileSize = (NnSize)seekToEnd(fd);
+    }
 
     if (header.archType == QWEN3 || header.archType == QWEN3_MOE)
         header.ropeType = ROPE_FALCON;
@@ -605,6 +669,60 @@ LlmNet buildLlmNet(LlmHeader *h, NnUint nNodes, NnUint nBatches) {
     return n;
 }
 
+void splitModelFile(const char *path, size_t targetChunkSize) {
+    FILE* f = fopen(path, "rb");
+    if (!f)
+        throw std::runtime_error(std::string("Cannot open model file: ") + path);
+
+    size_t totalSize = getFileSize64(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (totalSize == 0) {
+        fclose(f);
+        throw std::runtime_error("Model file is empty");
+    }
+
+    int nParts = (int)((totalSize + targetChunkSize - 1) / targetChunkSize);
+    size_t chunkSize = (totalSize + nParts - 1) / nParts;
+
+    printf("Splitting %s (%.1f MB) into %d parts (~%.1f MB each)...\n",
+        path, (double)totalSize / 1024.0 / 1024.0, nParts, (double)chunkSize / 1024.0 / 1024.0);
+
+    std::vector<NnByte> buf(chunkSize);
+    size_t remaining = totalSize;
+    char partPath[2048];
+
+    for (int i = 0; i < nParts; i++) {
+        snprintf(partPath, sizeof(partPath), "%s.part%03d", path, i);
+        size_t toRead = (remaining < chunkSize) ? remaining : chunkSize;
+
+        size_t readBytes = fread(buf.data(), 1, toRead, f);
+        if (readBytes != toRead) {
+            fclose(f);
+            throw std::runtime_error("Read error while splitting model file");
+        }
+
+        FILE* out = fopen(partPath, "wb");
+        if (!out) {
+            fclose(f);
+            throw std::runtime_error(std::string("Cannot create chunk file: ") + partPath);
+        }
+        size_t written = fwrite(buf.data(), 1, toRead, out);
+        fclose(out);
+        if (written != toRead) {
+            fclose(f);
+            throw std::runtime_error(std::string("Write error for chunk: ") + partPath);
+        }
+
+        remaining -= toRead;
+        printf("  [%d/%d] %s (%.1f MB)\n", i + 1, nParts, partPath, (double)toRead / 1024.0 / 1024.0);
+    }
+
+    fclose(f);
+    printf("Done. %d chunk files created.\n", nParts);
+    printf("You may now delete the original file: %s\n", path);
+}
+
 void releaseLlmNet(LlmNet *net) {
     for (NnUint nodeIndex = 0u; nodeIndex < net->netConfig.nNodes; nodeIndex++)
         releaseNodeConfig(&net->nodeConfigs[nodeIndex]);
@@ -613,17 +731,48 @@ void releaseLlmNet(LlmNet *net) {
 }
 
 void loadLlmNetWeight(const char *path, LlmNet *net, NnRootWeightLoader *loader) {
-    MmapFile file;
-    openMmapFile(&file, path, net->header->fileSize);
+    bool isChunked = !fileExists(path);
+    MmapFile mmapFile;
+    NnByte *chunkedData = nullptr;
+
+    if (isChunked) {
+        int nParts = 0;
+        size_t totalSize = getChunksTotalSize(path, &nParts);
+        if (nParts == 0)
+            throw std::runtime_error(std::string("Model file not found: ") + path);
+        printf("💿 Loading %d weight chunks (%.0f MB total)...\n",
+            nParts, (double)totalSize / 1024.0 / 1024.0);
+        chunkedData = readChunksToBuffer(path, nParts, totalSize);
+    } else {
+        openMmapFile(&mmapFile, path, net->header->fileSize);
+    }
+
+    struct Cleanup {
+        bool isChunked;
+        MmapFile* mmapFile;
+        NnByte* chunkedData;
+        bool closeMmap;
+        ~Cleanup() {
+            if (isChunked && chunkedData) free(chunkedData);
+            else if (closeMmap) closeMmapFile(mmapFile);
+        }
+    } cleanup = {isChunked, &mmapFile, chunkedData,
 #if DEBUG_USE_MMAP_FOR_WEIGHTS
-    assert(net->netConfig.nNodes == 1u);
+        false
 #else
-    std::unique_ptr<MmapFile, void(*)(MmapFile *)> fdPtr(&file, closeMmapFile);
+        !isChunked
+#endif
+    };
+    (void)cleanup;
+
+#if DEBUG_USE_MMAP_FOR_WEIGHTS
+    if (!isChunked) assert(net->netConfig.nNodes == 1u);
+#else
     printf("💿 Loading weights...\n");
 #endif
 
     Timer timer;
-    NnByte *data = (NnByte *)file.data;
+    NnByte *data = isChunked ? chunkedData : (NnByte*)mmapFile.data;
     NnByte *b = &data[net->header->headerSize];
     b += loader->loadRoot("embedding", 0, net->tokenEmbeddingSize.nBytes, b);
 

@@ -274,7 +274,11 @@ int main(int argc, char **argv) {
             runInferenceApp(&args, &chat);
         else if (std::strcmp(args.mode, "worker") == 0)
             runWorkerApp(&args);
-        else
+        else if (std::strcmp(args.mode, "split-model") == 0) {
+            if (args.modelPath == nullptr)
+                throw std::runtime_error("--model <path> is required for split-model");
+            splitModelFile(args.modelPath);
+        } else
             throw std::runtime_error("Unsupported mode");
     } catch (const std::exception &e) {
         printf("🚨 Critical error: %s\n", e.what());

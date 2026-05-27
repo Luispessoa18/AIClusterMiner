@@ -100,5 +100,6 @@ void printLlmHeader(LlmHeader *header);
 LlmNet buildLlmNet(LlmHeader *h, NnUint nNodes, NnUint nBatches);
 void releaseLlmNet(LlmNet *net);
 void loadLlmNetWeight(const char* path, LlmNet *net, NnRootWeightLoader *loader);
+void splitModelFile(const char* path, size_t targetChunkSize = 100ULL * 1024 * 1024);
 
 #endif

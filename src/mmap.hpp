@@ -32,6 +32,13 @@ long seekToEnd(FILE* file) {
 #endif
 }
 
+static inline bool fileExists(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+    fclose(f);
+    return true;
+}
+
 void openMmapFile(MmapFile *file, const char *path, size_t size) {
     file->size = size;
 #ifdef _WIN32
