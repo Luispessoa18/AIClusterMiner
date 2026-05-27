@@ -703,7 +703,7 @@ public:
 
             i += batchSize;
             pos += batchSize;
-            token = promptTokens[i + 1];
+            token = promptTokens[i]; // last prompt token seeds first generation step
         }
 
         context->inference->setBatchSize(1);
