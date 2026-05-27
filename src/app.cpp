@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstring>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 #if defined(DLLAMA_VULKAN)
     #include "nn/nn-vulkan.hpp"
@@ -46,7 +47,7 @@ AppCliArgs AppCliArgs::parse(int argc, char* *argv, bool requireMode) {
     args.cacheDir = nullptr;
     args.nodeIndex = 0;
     args.numNodes = 0;
-    args.temperature = 0.8f;
+    args.temperature = 0.0f;
     args.topp = 0.9f;
     args.steps = 0;
     args.seed = (unsigned long long)time(nullptr);
@@ -441,6 +442,17 @@ void runWorkerApp(AppCliArgs *args) {
             } catch (const NnConnectionSocketException &e) {
                 printf("🔍 Cannot reach server %s:%u: %s. Retrying...\n",
                        args->serverHost, args->serverPort, e.what());
+                std::this_thread::sleep_for(std::chrono::seconds(2));
+                continue;
+            } catch (const NnTransferSocketException &e) {
+                printf("Registration rejected by server %s:%u: %s. Retrying...\n",
+                       args->serverHost, args->serverPort, e.what());
+                std::this_thread::sleep_for(std::chrono::seconds(2));
+                continue;
+            } catch (const std::exception &e) {
+                printf("Registration failed with server %s:%u: %s. Retrying...\n",
+                       args->serverHost, args->serverPort, e.what());
+                std::this_thread::sleep_for(std::chrono::seconds(2));
                 continue;
             }
         }

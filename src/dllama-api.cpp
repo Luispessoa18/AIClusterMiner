@@ -122,8 +122,8 @@ body { font-family: system-ui, sans-serif; background: #111; color: #ddd; height
   <div class="panel">
     <h2>Generation</h2>
     <label>Max tokens <input id="max-tokens" type="number" min="1" max="4096" value="256"></label>
-    <label>Temperature <span id="temperature-value">0.2</span></label>
-    <input id="temperature" type="range" min="0" max="2" step="0.05" value="0.2">
+    <label>Temperature <span id="temperature-value">0</span></label>
+    <input id="temperature" type="range" min="0" max="2" step="0.05" value="0">
     <label>Top-p <span id="top-p-value">0.9</span></label>
     <input id="top-p" type="range" min="0" max="1" step="0.05" value="0.9">
     <label>Seed <input id="seed" type="number" min="0" placeholder="random"></label>
@@ -391,6 +391,14 @@ public:
             }
             buffer[bytesRead] = '\0';
             headerData.append(buffer);
+
+            if (headerData.size() >= sizeof(NnUint)) {
+                NnUint magic = 0;
+                std::memcpy(&magic, headerData.data(), sizeof(magic));
+                if (magic == WORKER_HELLO_MAGIC) {
+                    throw std::runtime_error("Worker registration received after API startup; restart root with --min-workers before starting workers");
+                }
+            }
 
             const size_t endRnRn = headerData.find("\r\n\r\n");
             if (endRnRn != std::string::npos) {
@@ -707,7 +715,6 @@ public:
 
         pos_t startPos = 0;
         std::vector<ChatMessage> deltaPrompt = params.messages;
-        naiveCache.resolveDeltaPrompt(deltaPrompt, startPos);
 
         size_t nInputItems = deltaPrompt.size();
         std::unique_ptr<ChatItem[]> inputItemsPtr(new ChatItem[nInputItems]);
@@ -740,6 +747,7 @@ public:
         }
 
         std::string buffer;
+        std::vector<int> generatedTokens;
 
         if (params.stream)
             request.writeStreamStartChunk();
@@ -786,7 +794,9 @@ public:
             context->inference->setToken(0, token);
             context->inference->forward();
 
+            applyRepetitionPenalty(context->inference->logitsPipe, generatedTokens, 64, 1.15f);
             token = context->sampler->sample(context->inference->logitsPipe);
+            generatedTokens.push_back(token);
 
             char *piece = context->tokenizer->decode(token);
             EosDetectorType eosType = eosDetector->append(token, piece);
@@ -891,6 +901,21 @@ private:
         }
         return params;
     }
+
+    void applyRepetitionPenalty(float *logits, const std::vector<int> &tokens, size_t window, float penalty) {
+        if (penalty <= 1.0f || tokens.empty())
+            return;
+        size_t start = tokens.size() > window ? tokens.size() - window : 0;
+        for (size_t i = start; i < tokens.size(); i++) {
+            int token = tokens[i];
+            if (token < 0 || token >= context->tokenizer->vocabSize)
+                continue;
+            if (logits[token] > 0.0f)
+                logits[token] /= penalty;
+            else
+                logits[token] *= penalty;
+        }
+    }
 };
 
 // ─── Route handlers ───────────────────────────────────────────────────────
@@ -989,6 +1014,8 @@ static void server(AppInferenceContext *context) {
             printf("Socket error: %d %s\n", e.code, e.what());
         } catch (const NnExecutorException &e) {
             throw;
+        } catch (const std::exception &e) {
+            printf("Request error: %s\n", e.what());
         }
     }
 }
