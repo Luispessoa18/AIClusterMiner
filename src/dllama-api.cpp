@@ -85,60 +85,67 @@ static const char *CHAT_HTML = R"HTML(<!DOCTYPE html>
 <title>dllama</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: system-ui, sans-serif; background: #111; color: #ddd; height: 100vh; display: flex; overflow: hidden; }
-#sidebar { width: 260px; background: #1a1a1a; border-right: 1px solid #2a2a2a; display: flex; flex-direction: column; padding: 12px; gap: 8px; overflow-y: auto; flex-shrink: 0; }
-#sidebar h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-bottom: 2px; }
-#speed-badge { background: #0d2d4a; color: #5af; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; display: none; }
+body { font-family: system-ui, sans-serif; background: #111; color: #ddd; height: 100dvh; display: flex; overflow: hidden; }
+button, input, textarea { font: inherit; }
+#sidebar { width: 280px; background: #1a1a1a; border-right: 1px solid #2a2a2a; display: flex; flex-direction: column; padding: 12px; gap: 10px; overflow-y: auto; flex-shrink: 0; }
+#sidebar h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #777; margin-top: 4px; }
+#docs-link { color: #9ac7ff; text-decoration: none; font-size: 13px; padding: 8px 10px; border: 1px solid #2b3c4d; border-radius: 8px; background: #17202a; }
+#docs-link:hover { border-color: #41607d; }
+#speed-badge { background: #0d2d4a; color: #75c8ff; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; display: none; }
+.field { display: grid; grid-template-columns: 1fr 86px; gap: 8px; align-items: center; color: #aaa; font-size: 12px; }
+.field input { width: 86px; background: #222; border: 1px solid #333; color: #eee; border-radius: 8px; padding: 7px 8px; outline: none; }
+.field input:focus { border-color: #4c6c88; }
 .panel { background: #1e1e1e; border-radius: 8px; padding: 10px 12px; border: 1px solid #2a2a2a; }
-.panel label { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: #aaa; font-size: 12px; margin: 7px 0; }
-.panel input[type="number"] { width: 82px; background: #151515; color: #eee; border: 1px solid #333; border-radius: 6px; padding: 5px 7px; }
-.panel input[type="range"] { width: 100%; }
-.panel input[type="checkbox"] { accent-color: #2d73c5; }
 .stat { color: #888; font-size: 11px; line-height: 1.6; }
-.node-card { background: #1e1e1e; border-radius: 8px; padding: 10px 12px; border: 1px solid #2a2a2a; }
+.node-card { background: #1f1f1f; border-radius: 8px; padding: 10px 12px; border: 1px solid #2a2a2a; }
 .node-card .name { font-size: 13px; font-weight: 600; color: #eee; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.node-card .meta { font-size: 11px; color: #666; line-height: 1.7; }
-.node-card .pts { margin-top: 5px; font-size: 12px; color: #e8a020; font-weight: 600; }
-#chat { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.node-card .meta { font-size: 11px; color: #777; line-height: 1.7; }
+.node-card .pts { margin-top: 5px; font-size: 12px; color: #e8b04d; font-weight: 600; }
+#chat { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 #messages { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; }
-.msg { max-width: 72%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.msg { max-width: 72%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
 .msg.user { align-self: flex-end; background: #1a3d6e; color: #e8f0ff; border-bottom-right-radius: 4px; }
 .msg.assistant { align-self: flex-start; background: #222; color: #ddd; border-bottom-left-radius: 4px; }
-.msg.assistant.typing::after { content: "▋"; animation: blink .7s step-end infinite; }
+.msg.assistant.typing::after { content: "|"; animation: blink .7s step-end infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 #input-area { padding: 12px 20px; background: #161616; border-top: 1px solid #2a2a2a; display: flex; gap: 8px; align-items: flex-end; }
-#prompt { flex: 1; background: #222; border: 1px solid #333; border-radius: 10px; padding: 10px 14px; color: #eee; font-size: 14px; resize: none; outline: none; font-family: inherit; min-height: 44px; max-height: 160px; line-height: 1.5; }
+#prompt { flex: 1; background: #222; border: 1px solid #333; border-radius: 10px; padding: 10px 14px; color: #eee; font-size: 14px; resize: none; outline: none; min-height: 44px; max-height: 160px; line-height: 1.5; min-width: 0; }
 #prompt:focus { border-color: #3a5a8a; }
-#send { background: #1a3d6e; color: #d0e4ff; border: none; border-radius: 10px; padding: 10px 22px; cursor: pointer; font-size: 14px; font-weight: 600; flex-shrink: 0; height: 44px; }
-#stop { background: #4a1d1d; color: #ffd8d8; border: none; border-radius: 10px; padding: 10px 16px; cursor: pointer; font-size: 14px; font-weight: 600; flex-shrink: 0; height: 44px; display: none; }
+#send, #stop { border: none; border-radius: 10px; padding: 10px 18px; cursor: pointer; font-size: 14px; font-weight: 600; flex-shrink: 0; height: 44px; }
+#send { background: #1a3d6e; color: #d0e4ff; }
+#stop { background: #3a2525; color: #ffd5d5; display: none; }
 #send:hover:not(:disabled) { background: #234e8c; }
-#send:disabled { opacity: 0.4; cursor: default; }
+#stop:hover:not(:disabled) { background: #533232; }
+#send:disabled, #stop:disabled { opacity: 0.45; cursor: default; }
+@media (max-width: 780px) {
+  body { flex-direction: column; }
+  #sidebar { width: 100%; max-height: 260px; border-right: 0; border-bottom: 1px solid #2a2a2a; }
+  .msg { max-width: 88%; }
+  #messages { padding: 16px; }
+  #input-area { padding: 10px; }
+}
 </style>
 </head>
 <body>
 <div id="sidebar">
+  <a id="docs-link" href="/docs">API docs</a>
+  <h2>Generation</h2>
+  <label class="field">Max tokens <input id="max-tokens" type="number" min="1" max="4096" value="256"></label>
+  <label class="field">Temperature <input id="temperature" type="number" min="0" max="2" step="0.1" value="0.2"></label>
+  <label class="field">Top P <input id="top-p" type="number" min="0" max="1" step="0.05" value="0.9"></label>
   <h2>Nodes</h2>
   <div id="speed-badge"></div>
+  <label class="field">Seed <input id="seed" type="number" min="0" placeholder="random"></label>
   <div class="panel">
-    <h2>Generation</h2>
-    <label>Max tokens <input id="max-tokens" type="number" min="1" max="4096" value="256"></label>
-    <label>Temperature <span id="temperature-value">0</span></label>
-    <input id="temperature" type="range" min="0" max="2" step="0.05" value="0">
-    <label>Top-p <span id="top-p-value">0.9</span></label>
-    <input id="top-p" type="range" min="0" max="1" step="0.05" value="0.9">
-    <label>Seed <input id="seed" type="number" min="0" placeholder="random"></label>
-    <label>Stream <input id="stream" type="checkbox"></label>
-  </div>
-  <div class="panel">
-    <h2>Last reply</h2>
+    <h2 style="margin-bottom:6px">Last reply</h2>
     <div id="last-usage" class="stat">No reply yet</div>
   </div>
-  <div id="nodes-list"><div style="color:#555;font-size:12px;padding:4px 0">Loading...</div></div>
+  <div id="nodes-list"><div style="color:#666;font-size:12px;padding:4px 0">Loading...</div></div>
 </div>
 <div id="chat">
   <div id="messages"></div>
   <div id="input-area">
-    <textarea id="prompt" placeholder="Type a message… (Shift+Enter for new line)" rows="1"></textarea>
+    <textarea id="prompt" placeholder="Type a message... (Shift+Enter for new line)" rows="1"></textarea>
     <button id="send">Send</button>
     <button id="stop">Stop</button>
   </div>
@@ -146,10 +153,16 @@ body { font-family: system-ui, sans-serif; background: #111; color: #ddd; height
 <script>
 const history = [];
 let busy = false;
-let controller = null;
+let aborter = null;
 
 function esc(t) {
-  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function num(id, fallback, min, max) {
+  const value = Number(document.getElementById(id).value);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
 }
 
 function renderAll() {
@@ -174,6 +187,13 @@ function appendToLast(text) {
   box.scrollTop = box.scrollHeight;
 }
 
+function setBusy(next) {
+  busy = next;
+  document.getElementById('send').disabled = next;
+  document.getElementById('stop').disabled = !next;
+  document.getElementById('stop').style.display = next ? 'inline-block' : 'none';
+}
+
 async function send() {
   const ta = document.getElementById('prompt');
   const text = ta.value.trim();
@@ -187,82 +207,65 @@ async function send() {
   const last = getLastEl();
   if (last) last.classList.add('typing');
 
-  busy = true;
-  controller = new AbortController();
-  document.getElementById('send').disabled = true;
-  document.getElementById('stop').style.display = 'block';
+  setBusy(true);
+  aborter = new AbortController();
 
   try {
     const msgs = history.slice(0, -1).map(m => ({role:m.role, content:m.content}));
-    const stream = document.getElementById('stream').checked;
-    const maxTokens = Math.max(1, Math.min(4096, Number(document.getElementById('max-tokens').value) || 256));
     const body = {
       messages: msgs,
-      stream,
-      max_tokens: maxTokens,
-      temperature: Number(document.getElementById('temperature').value),
-      top_p: Number(document.getElementById('top-p').value)
+      stream: true,
+      max_tokens: Math.round(num('max-tokens', 256, 1, 4096)),
+      temperature: num('temperature', 0.2, 0, 2),
+      top_p: num('top-p', 0.9, 0, 1),
+      stop: ['<|eot_id|>']
     };
-    const seed = document.getElementById('seed').value.trim();
-    if (seed) body.seed = Number(seed);
+    const seedVal = document.getElementById('seed').value.trim();
+    if (seedVal) body.seed = Number(seedVal);
     const res = await fetch('/v1/chat/completions', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      signal: controller.signal,
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: aborter.signal
     });
-    if (stream) {
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      while (true) {
-        const {done, value} = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, {stream:true});
-        const lines = buf.split('\n');
-        buf = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data:')) continue;
-          const data = line.slice(5).trim();
-          if (data === '[DONE]') continue;
-          try {
-            const j = JSON.parse(data);
-            const delta = j?.choices?.[0]?.delta?.content;
-            if (delta) appendToLast(delta);
-          } catch {}
-        }
+    if (!res.ok) throw new Error((await res.text()) || res.statusText);
+    if (!res.body) throw new Error('missing response body');
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    let doneSignal = false;
+    while (!doneSignal) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream:true});
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (data === '[DONE]') { doneSignal = true; break; }
+        try {
+          const j = JSON.parse(data);
+          const delta = j?.choices?.[0]?.delta?.content;
+          if (delta) appendToLast(delta);
+        } catch {}
       }
-    } else {
-      const j = await res.json();
-      history[history.length-1].content = j?.choices?.[0]?.message?.content || '';
-      const usage = j?.usage || {};
-      document.getElementById('last-usage').textContent =
-        `${(usage.prompt_tokens || 0).toLocaleString()} prompt + ${(usage.completion_tokens || 0).toLocaleString()} completion = ${(usage.total_tokens || 0).toLocaleString()} tokens`;
-      renderAll();
     }
   } catch(e) {
-    if (e.name === 'AbortError') appendToLast('\n[stopped]');
-    else appendToLast('\n[error: ' + e.message + ']');
+    if (e.name !== 'AbortError') appendToLast('\n[error: ' + e.message + ']');
+  } finally {
+    const el = getLastEl();
+    if (el) el.classList.remove('typing');
+    aborter = null;
+    setBusy(false);
+    fetchWorkers();
   }
-
-  const el = getLastEl();
-  if (el) el.classList.remove('typing');
-  busy = false;
-  controller = null;
-  document.getElementById('send').disabled = false;
-  document.getElementById('stop').style.display = 'none';
-  fetchWorkers();
 }
 
 document.getElementById('send').addEventListener('click', send);
 document.getElementById('stop').addEventListener('click', () => {
-  if (controller) controller.abort();
+  if (aborter) aborter.abort();
 });
-for (const id of ['temperature', 'top-p']) {
-  const input = document.getElementById(id);
-  const output = document.getElementById(id + '-value');
-  input.addEventListener('input', () => { output.textContent = input.value; });
-}
 document.getElementById('prompt').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); return; }
   requestAnimationFrame(() => {
@@ -301,6 +304,225 @@ async function fetchWorkers() {
 
 fetchWorkers();
 setInterval(fetchWorkers, 5000);
+</script>
+</body>
+</html>
+)HTML";
+
+static const char *DOCS_HTML = R"HTML(<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dllama API docs</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { min-height: 100dvh; background: #101112; color: #e5e5e5; font-family: system-ui, sans-serif; }
+button, input, textarea { font: inherit; }
+header { height: 56px; border-bottom: 1px solid #2b2d30; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; background: #17191b; }
+header h1 { font-size: 16px; font-weight: 650; }
+header a { color: #9ac7ff; text-decoration: none; font-size: 13px; border: 1px solid #2d4256; padding: 7px 10px; border-radius: 8px; background: #17202a; }
+main { display: grid; grid-template-columns: minmax(320px, 440px) minmax(0, 1fr); gap: 18px; padding: 18px; max-width: 1440px; margin: 0 auto; }
+.panel { border: 1px solid #2b2d30; background: #17191b; border-radius: 8px; padding: 14px; }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+h2 { font-size: 12px; color: #8f98a3; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+.row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+label { display: flex; flex-direction: column; gap: 6px; color: #aeb4ba; font-size: 12px; }
+input, textarea { width: 100%; border: 1px solid #34383d; background: #101112; color: #f0f0f0; border-radius: 8px; outline: none; }
+input { height: 38px; padding: 8px 10px; }
+textarea { min-height: 210px; padding: 10px; line-height: 1.45; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+input:focus, textarea:focus { border-color: #4e7292; }
+button { min-height: 38px; border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; background: #1d4b7c; color: #e3f1ff; font-weight: 650; }
+button.secondary { background: #26323c; color: #d7e0e7; }
+button.danger { background: #4a2828; color: #ffdada; }
+button:disabled { opacity: 0.45; cursor: default; }
+.toggle { flex-direction: row; align-items: center; gap: 8px; }
+.toggle input { width: auto; height: auto; }
+pre { min-height: 210px; max-height: calc(100dvh - 170px); overflow: auto; white-space: pre-wrap; word-break: break-word; border: 1px solid #2b2d30; background: #0b0c0d; color: #dce4ec; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.45; }
+#status { color: #95a2ae; font-size: 12px; min-height: 18px; }
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; padding: 12px; }
+  .row, .grid { grid-template-columns: 1fr; }
+  pre { max-height: 420px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>dllama API docs</h1>
+  <a href="/">Chat</a>
+</header>
+<main>
+  <div class="stack">
+    <section class="panel">
+      <h2>GET routes</h2>
+      <div class="row">
+        <button class="secondary" id="models">/v1/models</button>
+        <button class="secondary" id="workers">/v1/workers</button>
+        <button class="danger" id="abort" disabled>Stop</button>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>POST /v1/chat/completions</h2>
+      <div class="stack">
+        <label>Messages JSON
+          <textarea id="messages">[
+  {"role":"system","content":"You are a concise assistant."},
+  {"role":"user","content":"hello"}
+]</textarea>
+        </label>
+        <div class="grid">
+          <label>Max tokens <input id="max_tokens" type="number" min="1" max="4096" value="128"></label>
+          <label>Temperature <input id="temperature" type="number" min="0" max="2" step="0.1" value="0.2"></label>
+          <label>Top P <input id="top_p" type="number" min="0" max="1" step="0.05" value="0.9"></label>
+          <label>Seed <input id="seed" type="number" min="0" placeholder="optional"></label>
+        </div>
+        <label>Stop strings <input id="stop" value="<|eot_id|>"></label>
+        <label class="toggle"><input id="stream" type="checkbox" checked> Stream response</label>
+        <button id="send">Send request</button>
+      </div>
+    </section>
+  </div>
+  <section class="panel">
+    <h2>Request</h2>
+    <pre id="request"></pre>
+    <h2 style="margin-top:14px">Response</h2>
+    <pre id="response"></pre>
+    <div id="status"></div>
+  </section>
+</main>
+<script>
+let aborter = null;
+
+function setStatus(text) {
+  document.getElementById('status').textContent = text;
+}
+
+function setRunning(running) {
+  document.getElementById('send').disabled = running;
+  document.getElementById('models').disabled = running;
+  document.getElementById('workers').disabled = running;
+  document.getElementById('abort').disabled = !running;
+}
+
+function writeRequest(method, path, body) {
+  document.getElementById('request').textContent = method + ' ' + path + (body ? '\n\n' + JSON.stringify(body, null, 2) : '');
+}
+
+function writeResponse(value) {
+  document.getElementById('response').textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+}
+
+function num(id, fallback, min, max) {
+  const value = Number(document.getElementById(id).value);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+function buildChatBody() {
+  const messages = JSON.parse(document.getElementById('messages').value);
+  const stop = document.getElementById('stop').value
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  const seedRaw = document.getElementById('seed').value.trim();
+  const body = {
+    messages,
+    stream: document.getElementById('stream').checked,
+    max_tokens: Math.round(num('max_tokens', 128, 1, 4096)),
+    temperature: num('temperature', 0.2, 0, 2),
+    top_p: num('top_p', 0.9, 0, 1)
+  };
+  if (stop.length) body.stop = stop;
+  if (seedRaw) body.seed = Number(seedRaw);
+  return body;
+}
+
+async function runGet(path) {
+  aborter = new AbortController();
+  setRunning(true);
+  setStatus('Running...');
+  writeRequest('GET', path);
+  writeResponse('');
+  try {
+    const res = await fetch(path, {signal: aborter.signal});
+    const text = await res.text();
+    setStatus('HTTP ' + res.status);
+    try { writeResponse(JSON.parse(text)); } catch { writeResponse(text); }
+  } catch (e) {
+    if (e.name !== 'AbortError') writeResponse('[error] ' + e.message);
+  } finally {
+    aborter = null;
+    setRunning(false);
+  }
+}
+
+async function runChat() {
+  let body;
+  try {
+    body = buildChatBody();
+  } catch (e) {
+    writeResponse('[invalid messages JSON] ' + e.message);
+    return;
+  }
+  aborter = new AbortController();
+  setRunning(true);
+  setStatus('Running...');
+  writeRequest('POST', '/v1/chat/completions', body);
+  writeResponse('');
+  try {
+    const res = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+      signal: aborter.signal
+    });
+    setStatus('HTTP ' + res.status);
+    if (!res.ok) throw new Error((await res.text()) || res.statusText);
+    if (!body.stream) {
+      writeResponse(await res.json());
+      return;
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    const out = document.getElementById('response');
+    let buf = '';
+    let doneSignal = false;
+    while (!doneSignal) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream:true});
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (data === '[DONE]') { doneSignal = true; break; }
+        try {
+          const chunk = JSON.parse(data);
+          const delta = chunk?.choices?.[0]?.delta?.content;
+          if (delta) out.textContent += delta;
+        } catch {
+          out.textContent += data + '\n';
+        }
+      }
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') writeResponse('[error] ' + e.message);
+  } finally {
+    aborter = null;
+    setRunning(false);
+  }
+}
+
+document.getElementById('models').addEventListener('click', () => runGet('/v1/models'));
+document.getElementById('workers').addEventListener('click', () => runGet('/v1/workers'));
+document.getElementById('send').addEventListener('click', runChat);
+document.getElementById('abort').addEventListener('click', () => {
+  if (aborter) aborter.abort();
+});
+writeRequest('POST', '/v1/chat/completions', buildChatBody());
 </script>
 </body>
 </html>
@@ -697,15 +919,15 @@ public:
 class ApiServer {
 private:
     AppInferenceContext *context;
-    EosDetector *eosDetector;
+    TokenizerChatStops *tokenizerStops;
     ChatTemplateGenerator *templateGenerator;
     NaiveCache naiveCache;
     double *lastTokensPerSec;
 
 public:
-    ApiServer(AppInferenceContext *context, EosDetector *eosDetector, ChatTemplateGenerator *templateGenerator, double *lastTokensPerSec) {
+    ApiServer(AppInferenceContext *context, TokenizerChatStops *tokenizerStops, ChatTemplateGenerator *templateGenerator, double *lastTokensPerSec) {
         this->context = context;
-        this->eosDetector = eosDetector;
+        this->tokenizerStops = tokenizerStops;
         this->templateGenerator = templateGenerator;
         this->lastTokensPerSec = lastTokensPerSec;
     }
@@ -785,7 +1007,27 @@ public:
 
         context->inference->setBatchSize(1);
         context->tokenizer->resetDecoder();
-        eosDetector->reset();
+
+        std::vector<int> stopTokenIds;
+        std::vector<const char*> stopPieces;
+        std::vector<std::string> requestStopPieces = params.stop;
+        size_t maxStopLength = 0;
+        auto addStop = [&](int tokenId, const char *piece) {
+            if (piece == nullptr || piece[0] == '\0')
+                return;
+            for (const char *existing : stopPieces) {
+                if (std::strcmp(existing, piece) == 0)
+                    return;
+            }
+            stopTokenIds.push_back(tokenId);
+            stopPieces.push_back(piece);
+            maxStopLength = std::max(maxStopLength, std::strlen(piece));
+        };
+        for (size_t i = 0; i < tokenizerStops->nStops; i++)
+            addStop(context->tokenizer->eosTokenIds[i], tokenizerStops->stops[i]);
+        for (const std::string &stop : requestStopPieces)
+            addStop(-1, stop.c_str());
+        EosDetector eosDetector(stopTokenIds.size(), stopTokenIds.data(), stopPieces.data(), maxStopLength, maxStopLength);
 
         auto genStart = std::chrono::steady_clock::now();
 
@@ -799,7 +1041,7 @@ public:
             generatedTokens.push_back(token);
 
             char *piece = context->tokenizer->decode(token);
-            EosDetectorType eosType = eosDetector->append(token, piece);
+            EosDetectorType eosType = eosDetector.append(token, piece);
 
             if (piece != nullptr) {
                 printf("%s", piece);
@@ -807,14 +1049,14 @@ public:
             }
 
             if (eosType == NOT_EOS || eosType == EOS) {
-                char *delta = eosDetector->getDelta();
+                char *delta = eosDetector.getDelta();
                 if (delta != nullptr) {
                     std::string deltaStr(delta);
                     if (params.stream)
                         writeChatCompletionChunk(request, deltaStr, false);
                     buffer += deltaStr;
                 }
-                eosDetector->reset();
+                eosDetector.reset();
             }
             pos++;
             if (eosType == EOS) break;
@@ -966,14 +1208,13 @@ static void server(AppInferenceContext *context) {
 
     TokenizerChatStops stops(context->tokenizer);
     ChatTemplateGenerator templateGenerator(context->args->chatTemplateType, context->tokenizer->chatTemplate, stops.stops[0]);
-    EosDetector eosDetector(stops.nStops, context->tokenizer->eosTokenIds.data(), stops.stops, stops.maxStopLength, stops.maxStopLength);
 
     double lastTokensPerSec = 0.0;
 
     if (context->pointsFile != nullptr)
         loadPoints(context->pointsFile, context->workers, context->nWorkerInfos);
 
-    ApiServer api(context, &eosDetector, &templateGenerator, &lastTokensPerSec);
+    ApiServer api(context, &stops, &templateGenerator, &lastTokensPerSec);
 
     if (strcmp(context->args->host, "0.0.0.0") == 0 ||
         strcmp(context->args->host, "127.0.0.1") == 0)
@@ -984,6 +1225,16 @@ static void server(AppInferenceContext *context) {
             "/",
             HttpMethod::METHOD_GET,
             [](HttpRequest& req) { req.writeHtml(CHAT_HTML, strlen(CHAT_HTML)); }
+        },
+        {
+            "/docs",
+            HttpMethod::METHOD_GET,
+            [](HttpRequest& req) { req.writeHtml(DOCS_HTML, strlen(DOCS_HTML)); }
+        },
+        {
+            "/docs/",
+            HttpMethod::METHOD_GET,
+            [](HttpRequest& req) { req.writeHtml(DOCS_HTML, strlen(DOCS_HTML)); }
         },
         {
             "/v1/chat/completions",
@@ -1036,12 +1287,14 @@ void usage() {
     fprintf(stderr, "        [--nthreads <n>]\n");
     fprintf(stderr, "        [--workers <ip:port> ...]\n");
     fprintf(stderr, "        [--min-workers <n>]\n");
+    fprintf(stderr, "        [--worker-port <p>]  discovery registration port (default: --port)\n");
     fprintf(stderr, "        [--points-file <path>]\n");
     fprintf(stderr, "        [--temperature <temp>]\n");
     fprintf(stderr, "        [--topp <t>]\n");
     fprintf(stderr, "        [--seed <s>]\n");
     fprintf(stderr, "Example:\n");
     fprintf(stderr, "  sudo nice -n -20 ./dllama-api --port 9990 --nthreads 4 \\\n");
+    fprintf(stderr, "    --worker-port 9991 \\\n");
     fprintf(stderr, "    --model dllama_model_llama3_2_3b_instruct_q40.m \\\n");
     fprintf(stderr, "    --tokenizer dllama_tokenizer_llama3_2_3b_instruct_q40.t \\\n");
     fprintf(stderr, "    --buffer-float-type q80 --max-seq-len 8192 \\\n");

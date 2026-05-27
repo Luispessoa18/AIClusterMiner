@@ -99,11 +99,12 @@ You always need the root node and you can add 2^n - 1 worker nodes to speed up t
   --buffer-float-type q80 \
   --nthreads 4 \
   --port 9990 \
+  --worker-port 9991 \
   --min-workers 2 \
   --points-file /tmp/dllama_points.json
 ```
 
-With `--min-workers`, the server waits for that many workers to connect before starting inference. Worker IPs are discovered automatically. The optional `--points-file` persists a per-worker contribution score across sessions.
+With `--min-workers`, the server waits for that many workers to connect before starting inference. Worker IPs are discovered automatically. `--port` serves the web UI and API, while `--worker-port` receives worker discovery registrations; if omitted, `--worker-port` defaults to `--port` for backward compatibility. The optional `--points-file` persists a per-worker contribution score across sessions.
 
 ### 🔹 Running the Worker
 
@@ -119,7 +120,7 @@ With `--min-workers`, the server waits for that many workers to connect before s
 ./dllama worker \
   --port 9999 \
   --nthreads 4 \
-  --server 10.0.0.1:9990 \
+  --server 10.0.0.1:9991 \
   --cache-dir /tmp/dllama_cache
 ```
 
@@ -157,7 +158,7 @@ Worker
 
 | Argument                     | Description                                                                       | Example                  |
 | ---------------------------- | --------------------------------------------------------------------------------- | ------------------------ |
-| `--server <host:port>`       | Root node address to self-register with (enables discovery mode).                 | `10.0.0.1:9990`          |
+| `--server <host:port>`       | Root node discovery address to self-register with; use the root `--worker-port` when set. | `10.0.0.1:9991`          |
 | `--cache-dir <path>`         | Directory to persist model weights between sessions (skips retransmit on reuse).  | `/tmp/dllama_cache`      |
 
 API
@@ -165,6 +166,7 @@ API
 | Argument                     | Description                                                             | Example                        |
 | ---------------------------- | ----------------------------------------------------------------------- | ------------------------------ |
 | `--points-file <path>`       | JSON file to persist per-worker contribution points across sessions.    | `/tmp/dllama_points.json`      |
+| `--worker-port <port>`       | Discovery registration port for workers; defaults to `--port` if omitted. | `9991`                       |
 | `--net-turbo <0\|1>`         | Enable non-blocking sockets for faster sync (default: 1).               | `1`                            |
 
 Inference

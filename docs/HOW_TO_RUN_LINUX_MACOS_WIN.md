@@ -126,7 +126,7 @@ Discovery mode (worker self-registers with root at boot):
   --cache-dir models/llama3_2_3b_instruct_q40
 ```
 
-With `--cache-dir`, if the local cache is present (created by `prepare-worker`) the root skips weight transfer entirely. Without `--cache-dir` or without a pre-existing cache, the root transfers the weights on first connect and the cache is saved for subsequent runs.
+With `--server`, the worker self-registers with the root node. Use the root's `--worker-port` value here when the API server uses a separate worker registration port. With `--cache-dir`, if the local cache is present (created by `prepare-worker`) the root skips weight transfer entirely; without a pre-existing cache, weights are transferred on first connect and saved for subsequent runs.
 
 ---
 
@@ -164,6 +164,7 @@ With `--cache-dir`, if the local cache is present (created by `prepare-worker`) 
 ```sh
 ./dllama-api \
   --port 9990 \
+  --worker-port 9991 \
   --model models/llama3_2_3b_instruct_q40/dllama_model_llama3_2_3b_instruct_q40.m \
   --tokenizer models/llama3_2_3b_instruct_q40/dllama_tokenizer_llama3_2_3b_instruct_q40.t \
   --buffer-float-type q80 \
@@ -173,7 +174,7 @@ With `--cache-dir`, if the local cache is present (created by `prepare-worker`) 
   --points-file /tmp/dllama_points.json
 ```
 
-The server waits until the specified number of workers connect, then starts inference. If a worker disconnects it automatically waits for reconnection and reshards.
+The server waits until the specified number of workers connect, then starts inference. `--port` serves the web UI/API and `--worker-port` receives worker discovery registrations. If a worker disconnects it automatically waits for reconnection and reshards.
 
 Now you can connect to the API server:
 
