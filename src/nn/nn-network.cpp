@@ -365,30 +365,29 @@ void acceptWorkerRegistrations(const char *host, NnUint port, NnUint nWorkers,
             destroySocket(fd);
             continue;
         }
-        clientFds[i] = fd;
-        i++;
 
+        // Valid worker — read the rest of the hello payload using fd directly
         NnUint listenPort;
-        readSocket(clientFds[i], &listenPort, sizeof(listenPort));
+        readSocket(fd, &listenPort, sizeof(listenPort));
         outPorts[i] = listenPort;
 
         // Read display hostname sent by worker
         NnUint hostnameLen;
-        readSocket(clientFds[i], &hostnameLen, sizeof(hostnameLen));
+        readSocket(fd, &hostnameLen, sizeof(hostnameLen));
         std::vector<char> hostnameBuf(hostnameLen);
-        readSocket(clientFds[i], hostnameBuf.data(), hostnameLen);
+        readSocket(fd, hostnameBuf.data(), hostnameLen);
         std::strncpy(outSysInfo[i].displayHostname, hostnameBuf.data(), sizeof(outSysInfo[i].displayHostname) - 1);
         outSysInfo[i].displayHostname[sizeof(outSysInfo[i].displayHostname) - 1] = '\0';
 
-        readSocket(clientFds[i], &outSysInfo[i].cpuCores, sizeof(outSysInfo[i].cpuCores));
-        readSocket(clientFds[i], &outSysInfo[i].cpuMhz, sizeof(outSysInfo[i].cpuMhz));
-        readSocket(clientFds[i], &outSysInfo[i].totalMemoryMb, sizeof(outSysInfo[i].totalMemoryMb));
+        readSocket(fd, &outSysInfo[i].cpuCores, sizeof(outSysInfo[i].cpuCores));
+        readSocket(fd, &outSysInfo[i].cpuMhz, sizeof(outSysInfo[i].cpuMhz));
+        readSocket(fd, &outSysInfo[i].totalMemoryMb, sizeof(outSysInfo[i].totalMemoryMb));
         outSysInfo[i].listenPort = listenPort;
 
         // Get worker IP from the accepted connection
         struct sockaddr_in clientAddr;
         socklen_t addrLen = sizeof(clientAddr);
-        getpeername(clientFds[i], (struct sockaddr *)&clientAddr, &addrLen);
+        getpeername(fd, (struct sockaddr *)&clientAddr, &addrLen);
         const char *workerIp = inet_ntoa(clientAddr.sin_addr);
         std::strncpy(outSysInfo[i].connectHost, workerIp, sizeof(outSysInfo[i].connectHost) - 1);
         outSysInfo[i].connectHost[sizeof(outSysInfo[i].connectHost) - 1] = '\0';
@@ -399,6 +398,9 @@ void acceptWorkerRegistrations(const char *host, NnUint port, NnUint nWorkers,
                i + 1, outHosts[i], outPorts[i],
                outSysInfo[i].displayHostname, outSysInfo[i].cpuCores,
                outSysInfo[i].cpuMhz, outSysInfo[i].totalMemoryMb);
+
+        clientFds[i] = fd;
+        i++;
     }
 
     // Phase 2: send assignments (nodeIndex, nNodes, modelHash) to all workers
