@@ -1127,6 +1127,65 @@ NnSize NnRootWeightLoader::loadColMatmulSlices(const char *opName, const NnUint 
     return slice->size.nBytes;
 }
 
+// ─── NnPrepareWorkerWeightLoader ─────────────────────────────────────────────
+
+NnPrepareWorkerWeightLoader::NnPrepareWorkerWeightLoader(NnUint targetNodeIndex, NnUint nNodes, NnWorkerWeightCache *cache) {
+    this->targetNodeIndex = targetNodeIndex;
+    this->nNodes = nNodes;
+    this->cacheFile = cache->openForWriting();
+    this->temp = nullptr;
+    this->tempSize = 0;
+    printf("💾 Preparing weight cache for node %u/%u...\n", targetNodeIndex, nNodes);
+}
+
+NnPrepareWorkerWeightLoader::~NnPrepareWorkerWeightLoader() {
+    if (cacheFile != nullptr) fclose(cacheFile); // no terminator = isValid() returns false
+    if (tempSize > 0) delete[] temp;
+}
+
+void NnPrepareWorkerWeightLoader::allocate(NnSize size) {
+    if (tempSize < size) {
+        if (tempSize > 0) delete[] temp;
+        tempSize = size;
+        temp = new NnByte[size];
+    }
+}
+
+NnSize NnPrepareWorkerWeightLoader::loadRoot(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight) {
+    return nBytes; // root-only, skip
+}
+
+NnSize NnPrepareWorkerWeightLoader::loadAll(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight) {
+    NnWorkerWeightCache::writeEntry(cacheFile, opName, opIndex, 0u, nBytes, weight);
+    return nBytes;
+}
+
+NnSize NnPrepareWorkerWeightLoader::loadRowMatmulSlices(const char *opName, NnUint opIndex, NnUint expertIndex, NnRowMatmulSlice *slice, NnByte *weight) {
+    const NnSize destOffset = (NnSize)expertIndex * slice->sliceSize.nBytes;
+    allocate(slice->sliceSize.nBytes);
+    splitRowMatmulWeight(slice, targetNodeIndex, weight, temp);
+    NnWorkerWeightCache::writeEntry(cacheFile, opName, opIndex, destOffset, slice->sliceSize.nBytes, temp);
+    return slice->size.nBytes;
+}
+
+NnSize NnPrepareWorkerWeightLoader::loadColMatmulSlices(const char *opName, NnUint opIndex, NnUint expertIndex, NnColMatmulSlice *slice, NnByte *weight) {
+    const NnSize destOffset = (NnSize)expertIndex * slice->sliceSize.nBytes;
+    allocate(slice->sliceSize.nBytes);
+    splitColMatmulWeight(slice, targetNodeIndex, weight, temp);
+    NnWorkerWeightCache::writeEntry(cacheFile, opName, opIndex, destOffset, slice->sliceSize.nBytes, temp);
+    return slice->size.nBytes;
+}
+
+void NnPrepareWorkerWeightLoader::finish() {
+    if (cacheFile != nullptr) {
+        NnWorkerWeightCache::writeTerminator(cacheFile);
+        fclose(cacheFile);
+        cacheFile = nullptr;
+    }
+    if (tempSize > 0) { delete[] temp; tempSize = 0; }
+    printf("💾 Worker weight cache prepared\n");
+}
+
 NnWorkerWeightReader::NnWorkerWeightReader(NnExecutor *executor, NnNetwork *network) {
     this->executor = executor;
     this->network = network;

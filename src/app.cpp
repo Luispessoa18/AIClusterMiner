@@ -44,6 +44,8 @@ AppCliArgs AppCliArgs::parse(int argc, char* *argv, bool requireMode) {
     args.serverHost = nullptr;
     args.serverPort = 9990;
     args.cacheDir = nullptr;
+    args.nodeIndex = 0;
+    args.numNodes = 0;
     args.temperature = 0.8f;
     args.topp = 0.9f;
     args.steps = 0;
@@ -146,6 +148,10 @@ AppCliArgs AppCliArgs::parse(int argc, char* *argv, bool requireMode) {
             args.gpuSegmentTo = atoi(separator + 1);
         } else if (std::strcmp(name, "--net-turbo") == 0) {
             args.netTurbo = atoi(value) == 1;
+        } else if (std::strcmp(name, "--node-index") == 0) {
+            args.nodeIndex = (NnUint)atoi(value);
+        } else if (std::strcmp(name, "--num-nodes") == 0) {
+            args.numNodes = (NnUint)atoi(value);
         } else {
             throw std::runtime_error("Unknown option: " + std::string(name));
         }
@@ -512,4 +518,36 @@ void runWorkerApp(AppCliArgs *args) {
         // If using discovery mode: loop and re-register with server
         // If legacy mode: loop to accept next server connection
     }
+}
+
+void prepareWorkerWeightCache(AppCliArgs *args) {
+    if (args->modelPath == nullptr) throw std::runtime_error("--model required");
+    if (args->cacheDir == nullptr)  throw std::runtime_error("--cache-dir required");
+    if (args->nodeIndex == 0)       throw std::runtime_error("--node-index required (1-based worker node index)");
+    if (args->numNodes < 2)         throw std::runtime_error("--num-nodes required (total nodes including root, min 2)");
+    if (args->nodeIndex >= args->numNodes)
+        throw std::runtime_error("--node-index must be < --num-nodes");
+
+    printf("🔧 Preparing worker weight cache: node %u of %u\n", args->nodeIndex, args->numNodes);
+
+    NnUint maxSeqLen = args->maxSeqLen > 0 ? args->maxSeqLen : 4096;
+    LlmHeader header = loadLlmHeader(args->modelPath, maxSeqLen, args->syncType);
+
+    uint64_t modelHash = computeModelHash(args->modelPath);
+    printf("🔑 Model hash: %llx\n", (unsigned long long)modelHash);
+
+    LlmNet net = buildLlmNet(&header, args->numNodes, args->nBatches);
+    std::unique_ptr<LlmNet, void(*)(LlmNet *)> netPtr(&net, releaseLlmNet);
+
+    NnWorkerWeightCache cache(args->cacheDir, modelHash, args->numNodes, args->nodeIndex);
+    if (cache.isValid()) {
+        printf("✅ Cache already exists and is valid, skipping.\n");
+        return;
+    }
+
+    NnPrepareWorkerWeightLoader loader(args->nodeIndex, args->numNodes, &cache);
+    loadLlmNetWeight(args->modelPath, &net, &loader);
+    loader.finish();
+
+    printf("✅ Cache written to %s\n", args->cacheDir);
 }

@@ -278,6 +278,8 @@ int main(int argc, char **argv) {
             if (args.modelPath == nullptr)
                 throw std::runtime_error("--model <path> is required for split-model");
             splitModelFile(args.modelPath);
+        } else if (std::strcmp(args.mode, "prepare-worker") == 0) {
+            prepareWorkerWeightCache(&args);
         } else
             throw std::runtime_error("Unsupported mode");
     } catch (const std::exception &e) {

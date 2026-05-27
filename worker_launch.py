@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """
-worker_launch.py — Download model and start dllama worker.
+worker_launch.py — Download model, pre-cache weight slice, and start dllama worker.
 
 Usage:
-  python3 worker_launch.py <model>               # auto-discover root server
-  python3 worker_launch.py <model> --server IP   # use explicit root IP
-  python3 worker_launch.py                       # list available models
+  python3 worker_launch.py <model>                         # auto-discover root
+  python3 worker_launch.py <model> --server IP             # explicit root IP
+  python3 worker_launch.py <model> --node-index 1 --num-nodes 2  # pre-cache slice
+  python3 worker_launch.py                                 # list available models
 
 Options:
-  --server IP      Root server IP (skips discovery)
-  --port PORT      Worker port (default: 9999)
-  --root-port PORT Root discovery port to scan (default: 9990)
-  --nthreads N     CPU threads (default: auto-detect)
-  --cache-dir DIR  Cache dir for weights (default: ./models/<model>)
-  -y               Skip confirmation prompts
+  --server IP        Root server IP (skips LAN discovery)
+  --port PORT        Worker listen port (default: 9999)
+  --root-port PORT   Root discovery port (default: 9990)
+  --nthreads N       CPU threads (default: auto-detect)
+  --cache-dir DIR    Weight cache directory (default: ./models/<model>)
+  --node-index N     This worker's 1-based node index (enables local weight pre-cache)
+  --num-nodes N      Total nodes including root (required with --node-index)
+  -y                 Skip confirmation prompts
 """
 
 import os
@@ -166,11 +169,13 @@ def main():
 
     model = MODELS[model_name]
 
-    worker_port = int(parse_arg("--port", "9999"))
-    root_port   = int(parse_arg("--root-port", "9990"))
-    nthreads    = int(parse_arg("--nthreads", str(multiprocessing.cpu_count())))
+    worker_port   = int(parse_arg("--port", "9999"))
+    root_port     = int(parse_arg("--root-port", "9990"))
+    nthreads      = int(parse_arg("--nthreads", str(multiprocessing.cpu_count())))
     explicit_server = parse_arg("--server")
-    cache_dir   = parse_arg("--cache-dir", os.path.join("models", model_name))
+    cache_dir     = parse_arg("--cache-dir", os.path.join("models", model_name))
+    node_index    = parse_arg("--node-index")
+    num_nodes     = parse_arg("--num-nodes")
 
     # 1. Download model
     model_path = os.path.join(cache_dir, f"dllama_model_{model_name}.m")
@@ -183,7 +188,24 @@ def main():
     else:
         print(f"Model already cached at {cache_dir}")
 
-    # 2. Discover root server
+    # 2. Pre-cache weight slice locally (if node-index + num-nodes provided)
+    if node_index and num_nodes:
+        dllama = "./dllama.exe" if sys.platform == "win32" else "./dllama"
+        prep_cmd = [
+            dllama, "prepare-worker",
+            "--model", model_path,
+            "--cache-dir", cache_dir,
+            "--node-index", node_index,
+            "--num-nodes", num_nodes,
+            "--nthreads", str(nthreads),
+        ]
+        print(f"\nPre-caching weight slice for node {node_index}/{num_nodes}...")
+        print(f"Command: {' '.join(prep_cmd)}\n")
+        result = subprocess.run(prep_cmd)
+        if result.returncode != 0:
+            print("Warning: prepare-worker failed, will fall back to server weight transfer.")
+
+    # 3. Discover root server
     if explicit_server:
         root_ip = explicit_server
         print(f"Using explicit root server: {root_ip}")
@@ -195,7 +217,7 @@ def main():
             if not root_ip:
                 root_ip = None
 
-    # 3. Build dllama command
+    # 4. Build dllama command
     dllama = "./dllama.exe" if sys.platform == "win32" else "./dllama"
     cmd = [
         dllama, "worker",

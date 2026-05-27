@@ -730,7 +730,7 @@ void releaseLlmNet(LlmNet *net) {
     delete[] net->nodeConfigs;
 }
 
-void loadLlmNetWeight(const char *path, LlmNet *net, NnRootWeightLoader *loader) {
+void loadLlmNetWeight(const char *path, LlmNet *net, NnWeightLoader *loader) {
     bool isChunked = !fileExists(path);
     MmapFile mmapFile;
     NnByte *chunkedData = nullptr;

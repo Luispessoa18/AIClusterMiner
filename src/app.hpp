@@ -58,6 +58,10 @@ public:
     NnUint serverPort;   // worker: server's discovery port
     char *cacheDir;      // worker: directory to cache model weights between sessions
 
+    // prepare-worker mode
+    NnUint nodeIndex;    // 1-based worker node index
+    NnUint numNodes;     // total nodes (root + workers)
+
     static AppCliArgs parse(int argc, char **argv, bool hasMode);
     ~AppCliArgs();
 };
@@ -115,5 +119,6 @@ typedef struct {
 
 void runInferenceApp(AppCliArgs *args, void (*handler)(AppInferenceContext *context));
 void runWorkerApp(AppCliArgs *args);
+void prepareWorkerWeightCache(AppCliArgs *args);
 
 #endif

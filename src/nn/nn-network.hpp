@@ -139,7 +139,17 @@ public:
     NnNodeConfig readNode();
 };
 
-class NnRootWeightLoader {
+class NnWeightLoader {
+public:
+    virtual ~NnWeightLoader() = default;
+    virtual NnSize loadRoot(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight) = 0;
+    virtual NnSize loadAll(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight) = 0;
+    virtual NnSize loadRowMatmulSlices(const char *opName, NnUint opIndex, NnUint expertIndex, NnRowMatmulSlice *slice, NnByte *weight) = 0;
+    virtual NnSize loadColMatmulSlices(const char *opName, NnUint opIndex, NnUint expertIndex, NnColMatmulSlice *slice, NnByte *weight) = 0;
+    virtual void finish() = 0;
+};
+
+class NnRootWeightLoader : public NnWeightLoader {
 private:
     NnExecutor *executor;
     NnNetwork *network;
@@ -152,12 +162,32 @@ public:
     ~NnRootWeightLoader();
     void setWorkerCacheValid(NnUint nodeIndex, bool valid);
     void writeWeight(NnUint nodeIndex, const char *opName, NnUint opIndex, NnSize offset, NnSize nBytes, NnByte *weight);
-    NnSize loadRoot(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight);
-    NnSize loadAll(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight);
-    NnSize loadRowMatmulSlices(const char *opName, const NnUint opIndex, const NnUint expertIndex, NnRowMatmulSlice *slice, NnByte *weight);
-    NnSize loadColMatmulSlices(const char *opName, const NnUint opIndex, const NnUint expertIndex, NnColMatmulSlice *slice, NnByte *weight);
-    void finish();
+    NnSize loadRoot(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight) override;
+    NnSize loadAll(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight) override;
+    NnSize loadRowMatmulSlices(const char *opName, NnUint opIndex, NnUint expertIndex, NnRowMatmulSlice *slice, NnByte *weight) override;
+    NnSize loadColMatmulSlices(const char *opName, NnUint opIndex, NnUint expertIndex, NnColMatmulSlice *slice, NnByte *weight) override;
+    void finish() override;
 private:
+    void allocate(NnSize size);
+};
+
+// Generates a worker weight cache file from a local model file without network transfer.
+// Call loadLlmNetWeight with this loader, then finish() to write and close the cache.
+class NnPrepareWorkerWeightLoader : public NnWeightLoader {
+public:
+    NnPrepareWorkerWeightLoader(NnUint targetNodeIndex, NnUint nNodes, NnWorkerWeightCache *cache);
+    ~NnPrepareWorkerWeightLoader();
+    NnSize loadRoot(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight) override;
+    NnSize loadAll(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight) override;
+    NnSize loadRowMatmulSlices(const char *opName, NnUint opIndex, NnUint expertIndex, NnRowMatmulSlice *slice, NnByte *weight) override;
+    NnSize loadColMatmulSlices(const char *opName, NnUint opIndex, NnUint expertIndex, NnColMatmulSlice *slice, NnByte *weight) override;
+    void finish() override;
+private:
+    NnUint targetNodeIndex;
+    NnUint nNodes;
+    FILE *cacheFile;
+    NnByte *temp;
+    NnSize tempSize;
     void allocate(NnSize size);
 };
 
