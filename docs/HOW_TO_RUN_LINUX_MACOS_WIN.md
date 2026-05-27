@@ -39,7 +39,7 @@ make dllama
 make dllama-api
 ```
 
-4. Download the model to the **🔸 ROOT** device using the `launch.py` script. You don't need to download the model on worker devices.
+4. Download the model to the **🔸 ROOT** device using the `launch.py` script.
 
 ```sh
 python3 launch.py # Prints a list of available models
@@ -47,25 +47,88 @@ python3 launch.py # Prints a list of available models
 python3 launch.py llama3_2_3b_instruct_q40 # Downloads the model to the root device
 ```
 
-5. Start workers on all **🔹 WORKER** devices.
+5. Set up workers on all **🔹 WORKER** devices.
 
-**Option A — Static mode** (root lists all worker IPs explicitly):
+There are two approaches: using the helper script (`worker_launch.py`) or running `dllama` directly.
+
+---
+
+### Option A — Using `worker_launch.py` (recommended)
+
+`worker_launch.py` downloads the model, pre-caches your weight slice locally, and starts the worker automatically.
+
+**A1 — With local weight pre-cache (fastest start after first run)**
+
+Run once on each worker. Replace `--node-index` with this worker's number (1, 2, 3…) and `--num-nodes` with the total number of machines (root + all workers).
 
 ```sh
-./dllama worker --port 9999 --nthreads 4
+python3 worker_launch.py llama3_2_3b_instruct_q40 \
+  --node-index 1 \
+  --num-nodes 2 \
+  --server 10.0.0.1 \
+  --port 9999
 ```
 
-**Option B — Discovery mode** (worker connects to root automatically):
+The script will:
+1. Download the model to `models/llama3_2_3b_instruct_q40/` (skips if already present)
+2. Run `prepare-worker` to extract this node's weight slice into a local cache
+3. Start the worker — the root will detect the cache and skip weight transfer entirely
+
+On the second run the model is already downloaded and the cache already exists, so startup is instant.
+
+**A2 — Without pre-cache (auto-discovers root, receives weights from server)**
+
+```sh
+python3 worker_launch.py llama3_2_3b_instruct_q40 --server 10.0.0.1
+```
+
+---
+
+### Option B — Running `dllama` directly
+
+**B1 — Pre-cache weight slice manually (run once per worker before first connect)**
+
+This extracts the worker's slice from a locally downloaded model so it never needs to receive weights over the network.
+
+```sh
+# First, download the model on the worker device:
+python3 launch.py llama3_2_3b_instruct_q40 -skip-run -skip-script
+
+# Then generate the local weight cache for this node:
+./dllama prepare-worker \
+  --model models/llama3_2_3b_instruct_q40/dllama_model_llama3_2_3b_instruct_q40.m \
+  --cache-dir models/llama3_2_3b_instruct_q40 \
+  --node-index 1 \
+  --num-nodes 2 \
+  --nthreads 4
+```
+
+Replace `--node-index` with this worker's index (1-based) and `--num-nodes` with total nodes (root + all workers). Run `prepare-worker` once per worker; re-run only if the model or cluster size changes.
+
+**B2 — Start the worker (after prepare-worker, or to receive weights from root)**
+
+Static mode (root will list this worker's IP explicitly):
+
+```sh
+./dllama worker \
+  --port 9999 \
+  --nthreads 4 \
+  --cache-dir models/llama3_2_3b_instruct_q40
+```
+
+Discovery mode (worker self-registers with root at boot):
 
 ```sh
 ./dllama worker \
   --port 9999 \
   --nthreads 4 \
   --server 10.0.0.1:9990 \
-  --cache-dir /tmp/dllama_cache
+  --cache-dir models/llama3_2_3b_instruct_q40
 ```
 
-With `--server`, the worker self-registers with the root node. `--cache-dir` saves the received model weights locally so the next reconnect skips the full weight transfer.
+With `--cache-dir`, if the local cache is present (created by `prepare-worker`) the root skips weight transfer entirely. Without `--cache-dir` or without a pre-existing cache, the root transfers the weights on first connect and the cache is saved for subsequent runs.
+
+---
 
 6. Run the inference to test if everything works fine on the **🔸 ROOT** device:
 
